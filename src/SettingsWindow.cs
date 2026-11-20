@@ -21,7 +21,8 @@ namespace ReadyLauncher
         // General
         TextBox hotkeyBox, customW, customH;
         TextBlock hotkeyHint;
-        ComboBox windowSize, animation, volume, lampPlace, lampMode, themeBox;
+        ComboBox windowSize, animation, volume, volumeButtonHeight, lampPlace, lampMode, themeBox;
+        CheckBox volumeHideSlider, volumeButtonsOn, volumeCloseAfter;
         SavedLook ownLook;   // your own look, kept while a theme is chosen
         CheckBox hideAfter, hideDeact, startup, doubleClick;
         Slider animationSpeed;
@@ -39,17 +40,17 @@ namespace ReadyLauncher
         CheckBox sameColor;
         static readonly string[] PartPresets = { "#FFFFFF", "#1B1B1B", "#BDBDBD", "#FFB900", "#3A96DD", "#16C60C", "#E74856" };
 
-        // The open / close animations in the order Settings lists them: none, then the newer, fancier ones.
+        // The open / close animations in the order Settings lists them: none, randomize, then the newer, fancier ones.
         static readonly OpenAnimation[] AnimationOrder =
         {
-            OpenAnimation.None,
+            OpenAnimation.None, OpenAnimation.Random,
             OpenAnimation.Static, OpenAnimation.Flip, OpenAnimation.Rain, OpenAnimation.Beam, OpenAnimation.Glass,
             OpenAnimation.Fade, OpenAnimation.SlideUp, OpenAnimation.SlideDown, OpenAnimation.Zoom,
             OpenAnimation.Pop, OpenAnimation.Blur
         };
         static readonly string[] AnimationNames =
         {
-            "No animation",
+            "No animation", "Randomize",
             "TV static in / out", "Flip back (in) / away (out)", "Digital rain in / out", "Beam in / out (transporter light)",
             "Glass: shimmer in / shatter out",
             "Fade in / out", "Slide up (in) / down (out)", "Slide down (in) / up (out)", "Zoom",
@@ -59,6 +60,7 @@ namespace ReadyLauncher
         // Quick launch
         ComboBox dockSource, dockPos, dockAlign;
         Slider dockCount, dockTransparency, dockImageTransparency, dockGap, volumeGap;
+        Slider volumeButtonCount;
         CheckBox dockDivider, dockDetached;
         TextBox dockColorBox;
         ImageRow dockImageRow;
@@ -209,14 +211,73 @@ namespace ReadyLauncher
             AddRow(g, "Volume control", volume);
             volumeSize = Combo((int)s.VolumeSize, "Small", "Medium", "Large", "Extra large");
             AddRow(g, "Volume control size", volumeSize);
+            // Hide Slider [ ]  Buttons [ ]  ----o---- 5 : volume buttons on or off, how many (1 to 20), and buttons only.
+            bool hadButtons = s.VolumeStyle != VolumeStyleMode.Slider;
+            Func<string, CheckBox, string, StackPanel> labeled = (text, box, tip) =>
+            {
+                // The name sits before its box, and clicking the name ticks the box too.
+                var name = new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0), ToolTip = tip, Background = Brushes.Transparent };
+                name.MouseLeftButtonUp += delegate { if (box.IsEnabled) box.IsChecked = box.IsChecked != true; };
+                box.VerticalAlignment = VerticalAlignment.Center;
+                box.Margin = new Thickness(0);
+                box.ToolTip = tip;
+                System.Windows.Automation.AutomationProperties.SetName(box, text);
+                var part = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 18, 0) };
+                part.Children.Add(name);
+                part.Children.Add(box);
+                return part;
+            };
+            volumeHideSlider = new CheckBox { IsChecked = hadButtons && !s.VolumeSliderToo };
+            volumeButtonsOn = new CheckBox { IsChecked = hadButtons };
+            var hidePart = labeled("Hide Slider", volumeHideSlider, "Show only the volume buttons, without the volume slider");
+            var buttonsPart = labeled("Buttons", volumeButtonsOn, "Show a column of volume buttons that each set one volume");
+            volumeButtonCount = new Slider
+            {
+                Minimum = 1, Maximum = AppSettings.MaxVolumeButtons, Value = Math.Max(1, Math.Min(AppSettings.MaxVolumeButtons, hadButtons ? s.VolumeStepCount() : s.VolumeButtonCount)),
+                IsSnapToTickEnabled = true, TickFrequency = 1, SmallChange = 1, LargeChange = 5, VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = "How many volume buttons, from 1 to 20"
+            };
+            System.Windows.Automation.AutomationProperties.SetName(volumeButtonCount, "Number of volume buttons");
+            var countText = new TextBlock { MinWidth = 22, Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Right };
+            countText.Text = ((int)volumeButtonCount.Value).ToString();
+            volumeButtonCount.ValueChanged += delegate { countText.Text = ((int)volumeButtonCount.Value).ToString(); };
+            var styleRow = new Grid();
+            foreach (var w in new[] { GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto })
+                styleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
+            styleRow.Children.Add(hidePart);
+            Grid.SetColumn(buttonsPart, 1); styleRow.Children.Add(buttonsPart);
+            Grid.SetColumn(volumeButtonCount, 2); styleRow.Children.Add(volumeButtonCount);
+            Grid.SetColumn(countText, 3); styleRow.Children.Add(countText);
+            AddRow(g, "Volume control style", styleRow);
+            volumeButtonHeight = Combo((int)s.VolumeButtonHeight, "Small", "Medium", "Large");
+            AddRow(g, "Volume button height", volumeButtonHeight);
+            volumeCloseAfter = Check("Close the launcher after choosing a volume", s.VolumeCloseAfter);
+            var volumeChecks = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
+            volumeChecks.Children.Add(volumeCloseAfter);
+            AddRow(g, "Volume options", volumeChecks);
             volumeGap = AddSliderRow(g, "Volume distance from window", s.VolumeGap, 0, 200, " px");
             Action volumeGapState = () =>
             {
                 ((FrameworkElement)volumeGap.Parent).IsEnabled =
                     volume.SelectedIndex == (int)VolumePlacement.OutsideLeft || volume.SelectedIndex == (int)VolumePlacement.OutsideRight;
-                volumeSize.IsEnabled = volume.SelectedIndex != (int)VolumePlacement.Off;
+                bool on = volume.SelectedIndex != (int)VolumePlacement.Off;
+                bool buttons = on && volumeButtonsOn.IsChecked == true;
+                volumeSize.IsEnabled = on;
+                buttonsPart.IsEnabled = on;
+                hidePart.IsEnabled = buttons;          // buttons only: there have to be buttons
+                volumeButtonCount.IsEnabled = buttons;
+                countText.IsEnabled = buttons;
+                countText.Opacity = buttons ? 1 : 0.5;
+                volumeButtonHeight.IsEnabled = buttons;
+                volumeChecks.IsEnabled = on;
             };
             volume.SelectionChanged += delegate { volumeGapState(); };
+            volumeButtonsOn.Checked += delegate { volumeGapState(); };
+            volumeButtonsOn.Unchecked += delegate
+            {
+                volumeHideSlider.IsChecked = false;   // without buttons, the slider can't be hidden
+                volumeGapState();
+            };
             volumeGapState();
 
             doubleClick = Check("Open icons with a double-click (instead of a single click)", s.OpenWithDoubleClick);
@@ -861,6 +922,7 @@ namespace ReadyLauncher
                 if (!int.TryParse(customW.Text.Trim(), out cw) || !int.TryParse(customH.Text.Trim(), out ch) || cw < 400 || ch < 300 || cw > 7680 || ch > 4320)
                     return Fail("Enter a custom size between 400 x 300 and 7680 x 4320 pixels.");
             }
+
             bool resize = sizeMode != s.WindowSize || (sizeMode == WindowSizeMode.Custom && (cw != s.CustomWidthPx || ch != s.CustomHeightPx));
 
             var newArrange = ArrangeOrder[Math.Max(0, arrange.SelectedIndex)];
@@ -881,6 +943,11 @@ namespace ReadyLauncher
             s.OpenWithDoubleClick = doubleClick.IsChecked == true;
             s.Volume = (VolumePlacement)volume.SelectedIndex;
             s.VolumeGap = (int)volumeGap.Value;
+            s.VolumeStyle = volumeButtonsOn.IsChecked == true ? VolumeStyleMode.ButtonsCustom : VolumeStyleMode.Slider;
+            s.VolumeButtonCount = (int)volumeButtonCount.Value;
+            s.VolumeSliderToo = volumeHideSlider.IsChecked != true;
+            s.VolumeButtonHeight = (VolumeButtonSize)Math.Max(0, volumeButtonHeight.SelectedIndex);
+            s.VolumeCloseAfter = volumeCloseAfter.IsChecked == true;
             s.DockDetached = dockDetached.IsChecked == true;
             s.DockGap = (int)dockGap.Value;
             s.HideAfterLaunch = hideAfter.IsChecked == true;

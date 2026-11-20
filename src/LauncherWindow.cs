@@ -31,6 +31,10 @@ namespace ReadyLauncher
         Border shadowBorder, bgColor, bgImage, frame;
         DockPanel main;
         ScrollViewer scroll;
+        // The icons' scroll bar, at the launcher's right edge (outside an inside volume control, which never scrolls).
+        System.Windows.Controls.Primitives.ScrollBar sideBar;
+        Border sideBarHost;
+        bool syncingSideBar;
         Canvas canvas, dragLayer;
         TextBlock emptyHint;
         VolumePanel insideVolume;
@@ -119,13 +123,18 @@ namespace ReadyLauncher
             main = new DockPanel { LastChildFill = true };
             scroll = new ScrollViewer
             {
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,   // scrolls; its bar is sideBar
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 Focusable = false
             };
             canvas = new Canvas { Background = Brushes.Transparent, AllowDrop = true };
             scroll.Content = canvas;
             scroll.SizeChanged += delegate { OnCanvasResized(); };
+            sideBar = new System.Windows.Controls.Primitives.ScrollBar { Orientation = Orientation.Vertical, SmallChange = 40 };
+            sideBar.ValueChanged += (s, e) => { if (!syncingSideBar) scroll.ScrollToVerticalOffset(e.NewValue); };
+            System.Windows.Automation.AutomationProperties.SetName(sideBar, "Scroll the icons");
+            sideBarHost = new Border { Child = sideBar, Visibility = Visibility.Collapsed };
+            scroll.ScrollChanged += delegate { SyncSideBar(); };
             emptyHint = new TextBlock
             {
                 Text = "Drag apps, files or web links here\nor click  +  to browse for one",
@@ -201,24 +210,29 @@ namespace ReadyLauncher
 
             if (lampStrip != null && S.LampPanel == LampPanelPlace.Bottom) main.Children.Add(lampStrip);
 
+            DockPanel.SetDock(sideBarHost, Dock.Right);   // before the volume control, so it's outside it
+            main.Children.Add(sideBarHost);
+
             insideVolume = null;
             if (S.Volume == VolumePlacement.InsideLeft || S.Volume == VolumePlacement.InsideRight)
             {
                 double k = AppSettings.VolumeScale(S.VolumeSize);
-                insideVolume = new VolumePanel(new SolidColorBrush(Color.FromArgb(0x22, 0, 0, 0)), new SolidColorBrush(VolumeColor(false)), null)
+                insideVolume = new VolumePanel(new SolidColorBrush(Color.FromArgb(0x22, 0, 0, 0)), new SolidColorBrush(VolumeColor(false)), null, VolumeLookNow())
                 {
-                    Margin = new Thickness(10, 4, 10, 12), VerticalAlignment = VerticalAlignment.Bottom, Height = 230,
+                    Margin = new Thickness(10, 4, 10, 12), VerticalAlignment = VerticalAlignment.Bottom,
                     LayoutTransform = Math.Abs(k - 1) < 0.01 ? Transform.Identity : new ScaleTransform(k, k)
                 };
+                HookVolume(insideVolume);
                 DockPanel.SetDock(insideVolume, S.Volume == VolumePlacement.InsideLeft ? Dock.Left : Dock.Right);
                 main.Children.Add(insideVolume);
             }
 
             main.Children.Add(canvasHost);
 
-            scroll.VerticalScrollBarVisibility = S.ScrollEnabled ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
+            scroll.VerticalScrollBarVisibility = S.ScrollEnabled ? ScrollBarVisibility.Hidden : ScrollBarVisibility.Disabled;
             if (!S.ScrollEnabled) scroll.ScrollToTop();
             StyleScrollBar();
+            SyncSideBar();
 
             if (outsideVolume != null) { outsideVolume.Close(); outsideVolume = null; } // recreate in the new colors
             CloseNotes();
@@ -239,9 +253,9 @@ namespace ReadyLauncher
         /// </summary>
         void StyleScrollBar()
         {
-            if (scroll.Resources.MergedDictionaries.Count == 0)
+            if (sideBarHost.Resources.MergedDictionaries.Count == 0)
             {
-                try { scroll.Resources.MergedDictionaries.Add(SettingsTheme.ScrollBarStyles()); }
+                try { sideBarHost.Resources.MergedDictionaries.Add(SettingsTheme.ScrollBarStyles()); }
                 catch (Exception) { return; }   // keep Windows' own scroll bar
             }
             Color toward = Luminance(bg) > 0.5 ? Colors.Black : Colors.White;
@@ -249,8 +263,23 @@ namespace ReadyLauncher
             var hover = new SolidColorBrush(Mix(bg, toward, 0.55));
             thumb.Freeze();
             hover.Freeze();
-            scroll.Resources["T.Thumb"] = thumb;
-            scroll.Resources["T.ThumbHover"] = hover;
+            sideBarHost.Resources["T.Thumb"] = thumb;
+            sideBarHost.Resources["T.ThumbHover"] = hover;
+        }
+
+        /// <summary>The scroll bar follows the icons: shown only while they scroll, at their position.</summary>
+        void SyncSideBar()
+        {
+            bool show = S.ScrollEnabled && scroll.ScrollableHeight > 0.5;
+            sideBarHost.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            if (!show) return;
+            syncingSideBar = true;
+            sideBar.Minimum = 0;
+            sideBar.Maximum = scroll.ScrollableHeight;
+            sideBar.ViewportSize = scroll.ViewportHeight;
+            sideBar.LargeChange = Math.Max(1, scroll.ViewportHeight - 20);
+            sideBar.Value = scroll.VerticalOffset;
+            syncingSideBar = false;
         }
 
         static Color Mix(Color a, Color b, double t)
@@ -461,6 +490,7 @@ namespace ReadyLauncher
 
         void OnKey(object sender, KeyEventArgs e)
         {
+            if (e.Key == Key.Escape && VolumePanel.IsExactVolumeBox(e.OriginalSource)) return;   // cancels typing a volume, not the launcher
             bool typing = e.OriginalSource is System.Windows.Controls.Primitives.TextBoxBase;
             if (e.Key == Key.Delete && !typing && openFolder == null && SelectionCount > 0) { RemoveSelected(); e.Handled = true; return; }
             if (e.Key == Key.A && Keyboard.Modifiers == ModifierKeys.Control && !typing && openFolder == null) { SelectAll(); e.Handled = true; return; }
@@ -485,7 +515,9 @@ namespace ReadyLauncher
             if (outsideVolume == null)
             {
                 var back = new SolidColorBrush(Color.FromArgb((byte)(255 * bgAlpha), bg.R, bg.G, bg.B));
-                outsideVolume = new VolumeWindow(back, new SolidColorBrush(VolumeColor(true)), new SolidColorBrush(FrameBorder));
+                outsideVolume = new VolumeWindow(back, new SolidColorBrush(VolumeColor(true)), new SolidColorBrush(FrameBorder), VolumeLookNow());
+                HookVolume(outsideVolume.Panel);
+                outsideVolume.Deactivated += OnDeactivated;   // clicking away from it counts as clicking away from the launcher
                 outsideVolume.Owner = this;
                 outsideVolume.Topmost = !inBackground;
                 outsideVolume.SizeChanged += delegate { PlaceOutsideVolume(); };
@@ -494,6 +526,55 @@ namespace ReadyLauncher
             outsideVolume.SetScale(AppSettings.VolumeScale(S.VolumeSize));
             outsideVolume.Show();
             PlaceOutsideVolume();
+        }
+
+        VolumeLook VolumeLookNow()
+        {
+            return new VolumeLook { Style = S.VolumeStyle, SliderToo = S.VolumeSliderToo, Size = S.VolumeButtonHeight, Steps = S.VolumeSteps() };
+        }
+
+        void HookVolume(VolumePanel p)
+        {
+            p.StepEditRequested += EditVolumeStep;
+            p.VolumeChosen += delegate
+            {
+                if (!S.VolumeCloseAfter || inBackground) return;
+                // A moment to see the new volume first.
+                var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+                t.Tick += delegate { t.Stop(); if (IsVisible) HideLauncher(); };
+                t.Start();
+            };
+        }
+
+        /// <summary>Right-click on a volume button: type the volume it sets (empty puts back the one it came with).</summary>
+        void EditVolumeStep(int index)
+        {
+            int count = S.VolumeStepCount();
+            var now = S.VolumeSteps();
+            if (index < 0 || index >= count) return;
+            int standard = AppSettings.DefaultVolumeSteps(count)[index];
+            string prompt = "The volume this button sets, from 0 to 100%. Leave it empty to put back " + standard + "%.";
+            string initial = now[index].ToString();
+            while (true)
+            {
+                string answer = InputDialog.Ask(this, app, "Volume button", prompt, initial);
+                if (answer == null) return;   // canceled
+                string text = answer.Trim().TrimEnd('%').Trim();
+                int v;
+                if (text.Length == 0) v = standard;
+                else if (!int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.CurrentCulture, out v) || v < 0 || v > 100)
+                {
+                    prompt = "Type a whole number from 0 to 100, or leave it empty to put back " + standard + "%.";
+                    initial = answer;
+                    continue;
+                }
+                S.SetVolumeStep(index, v);
+                app.Save();
+                var steps = S.VolumeSteps();
+                if (insideVolume != null) insideVolume.SetSteps(steps);
+                if (outsideVolume != null) outsideVolume.Panel.SetSteps(steps);
+                return;
+            }
         }
 
         /// <summary>Line up everything that floats beside the launcher: lamp strip, detached strip, sensors, notes, then volume.</summary>

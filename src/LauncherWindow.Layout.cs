@@ -11,6 +11,7 @@ namespace ReadyLauncher
     internal partial class LauncherWindow
     {
         const double Pad = 14;
+        const double NearBottom = 4;    // how close to the bottom edge an icon (the picture, not its name) comes before the launcher scrolls
         int lastCols;
 
         double IconSize { get { return AppSettings.IconPixels(S.IconSize); } }
@@ -147,10 +148,20 @@ namespace ReadyLauncher
         {
             double fill = Math.Max(0, scroll.ActualHeight - 2);
             if (!S.ScrollEnabled) { canvas.Height = fill; return; }   // no scrolling: anything lower is simply cut off
-            double bottom = Data.Items.Count == 0 ? 0 : Data.Items.Max(i => i.Y) + CellH + Pad;
-            bottom = Math.Max(bottom, DecorationsBottom() + Pad);
-            // Fill the visible area (so drops land anywhere) without ever forcing a scrollbar.
-            canvas.Height = Math.Max(bottom, fill);
+            // Where the lowest icon (with its name), line or text ends, and where the lowest icon picture ends.
+            double low = DecorationsBottom(), reach = low;
+            foreach (var t in tiles.Values)
+            {
+                t.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                double top = Canvas.GetTop(t);
+                low = Math.Max(low, top + t.DesiredSize.Height);
+                reach = Math.Max(reach, top + t.IconBottom);
+            }
+            if (tiles.Count == 0 && Data.Items.Count > 0) { low = Math.Max(low, Data.Items.Max(i => i.Y) + CellH); reach = low; }
+            // Fill the visible area (so drops land anywhere). Only once an icon itself (or a line or text) reaches the
+            // bottom edge, or goes past it, add room for its name and a spare row below: the scroll bar shows.
+            double view = scroll.ActualHeight;
+            canvas.Height = view > 0 && reach > view - NearBottom ? Math.Max(fill, low + CellH) : fill;
         }
 
         /// <summary>Put new root items at a canvas point (or the next free spot) and save.</summary>

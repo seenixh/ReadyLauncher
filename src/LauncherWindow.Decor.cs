@@ -403,6 +403,51 @@ namespace ReadyLauncher
                         }
                         catch (Exception ex) { System.IO.File.AppendAllText(report, "refused: " + ex.Message + "\r\n"); }
                     }
+                    else if (action.StartsWith("animrandom:"))
+                    {
+                        // Test copies only: close and open the launcher n times (with Randomize, the picks go in anim-picks.txt).
+                        int left = int.Parse(action.Substring(11));
+                        var rt = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2.5) };
+                        rt.Tick += delegate
+                        {
+                            if (IsVisible) HideLauncher();
+                            else { ShowLauncher(); if (--left <= 0) rt.Stop(); }
+                        };
+                        rt.Start();
+                    }
+                    else if (action.StartsWith("volumeexact:"))
+                    {
+                        // Test copies only: click the volume percentage, type a value and press Enter ("esc:" first: Esc instead).
+                        string typed = action.Substring(12);
+                        bool enter = !typed.StartsWith("esc:");
+                        if (!enter) typed = typed.Substring(4);
+                        var et = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+                        et.Tick += delegate
+                        {
+                            et.Stop();
+                            var vp = insideVolume ?? (outsideVolume != null ? outsideVolume.Panel : null);
+                            if (vp == null) return;
+                            if (typed == "open") vp.TestExact(null, true);
+                            else if (typed == "escapekey") vp.TestEscapeKey();
+                            else vp.TestExact(typed, enter);
+                        };
+                        et.Start();
+                    }
+                    else if (action.StartsWith("volumeright:") || action == "volumeslider")
+                    {
+                        // Test copies only: a right-click on volume button n, or a press and let-go on the slider, a few
+                        // seconds after starting (once the volume control is there).
+                        var vt = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+                        vt.Tick += delegate
+                        {
+                            vt.Stop();
+                            var vp = insideVolume ?? (outsideVolume != null ? outsideVolume.Panel : null);
+                            if (vp == null) return;
+                            if (action == "volumeslider") vp.TestSliderPress();
+                            else vp.TestRightClick(int.Parse(action.Substring(12)));
+                        };
+                        vt.Start();
+                    }
                     else if (action.StartsWith("animcheck:")) TestAnimCheck(action.Substring(10));
                     else if (action.StartsWith("animshots:")) TestAnimShots(action.Substring(10));
                     else if (action.StartsWith("animframes:")) TestAnimFrames(action.Substring(11));
@@ -502,7 +547,10 @@ namespace ReadyLauncher
         {
             double bottom = 0;
             foreach (var v in decorViews.Values)
+            {
+                if (v.DesiredSize.Height <= 0) v.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));   // just made
                 bottom = Math.Max(bottom, Canvas.GetTop(v) + v.DesiredSize.Height);
+            }
             return bottom;
         }
     }

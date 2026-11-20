@@ -16,6 +16,29 @@ namespace ReadyLauncher
         int animToken;
         IOverlayAnimation shellOverlay;   // TV static or flip, drawn over the panel while it plays
 
+        // Randomize: one animation is picked each time the launcher opens, for that opening and the closing after it.
+        static readonly OpenAnimation[] RandomChoices =
+        {
+            OpenAnimation.Static, OpenAnimation.Flip, OpenAnimation.Rain, OpenAnimation.Beam, OpenAnimation.Glass,
+            OpenAnimation.Fade, OpenAnimation.SlideUp, OpenAnimation.SlideDown, OpenAnimation.Zoom, OpenAnimation.Pop, OpenAnimation.Blur
+        };
+        static readonly Random randomAnimation = new Random();
+        OpenAnimation randomPick = OpenAnimation.Fade;
+
+        /// <summary>The animation to play now: the one chosen in Settings, or this time's pick with Randomize.</summary>
+        OpenAnimation Anim { get { return S.Animation == OpenAnimation.Random ? randomPick : S.Animation; } }
+
+        /// <summary>Randomize: a new animation for this opening (never the same one twice in a row).</summary>
+        void PickRandomAnimation()
+        {
+            if (S.Animation != OpenAnimation.Random) return;
+            OpenAnimation next;
+            do next = RandomChoices[randomAnimation.Next(RandomChoices.Length)]; while (next == randomPick);
+            randomPick = next;
+            if (Program.TestMode)   // test copies: a list of the picks, to check them
+                try { System.IO.File.AppendAllText(System.IO.Path.Combine(LauncherData.DataFolder, "anim-picks.txt"), next + "\r\n"); } catch (Exception) { }
+        }
+
         void InitShellTransforms()
         {
             var g = new TransformGroup();
@@ -28,12 +51,21 @@ namespace ReadyLauncher
         void PrepareAnimateIn()
         {
             StopAnimations();
+            PickRandomAnimation();
             if (S.Animation != OpenAnimation.None) shell.Opacity = 0;
+        }
+
+        /// <summary>Test copies with Randomize: notes which animation an opening or closing really played.</summary>
+        void NoteRandomPlay(string what, OpenAnimation a)
+        {
+            if (!Program.TestMode || S.Animation != OpenAnimation.Random) return;
+            try { System.IO.File.AppendAllText(System.IO.Path.Combine(LauncherData.DataFolder, "anim-picks.txt"), "  " + what + " with " + a + "\r\n"); } catch (Exception) { }
         }
 
         void AnimateIn()
         {
-            var a = S.Animation;
+            var a = Anim;
+            NoteRandomPlay("opened", a);
             StopAnimations();
             if (a == OpenAnimation.None) return;
             if ((shellOverlay = ElementAnimator.StartOverlay(a, shell, true, S.AnimationSpeed, null)) != null) return;
@@ -60,7 +92,8 @@ namespace ReadyLauncher
 
         void AnimateOut(Action done)
         {
-            var a = S.Animation;
+            var a = Anim;
+            NoteRandomPlay("closed", a);
             StopAnimations();
             if (a == OpenAnimation.None) { done(); return; }
             hiding = true;
@@ -174,7 +207,7 @@ namespace ReadyLauncher
                 enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rtb));
                 using (var fs = System.IO.File.Create(System.IO.Path.Combine(folder, name + ".png"))) enc.Save(fs);
             };
-            int close = ElementAnimator.OverlayDuration(S.Animation, false, S.AnimationSpeed), open = ElementAnimator.OverlayDuration(S.Animation, true, S.AnimationSpeed);
+            int close = ElementAnimator.OverlayDuration(Anim, false, S.AnimationSpeed), open = ElementAnimator.OverlayDuration(Anim, true, S.AnimationSpeed);
             after(5000, () =>
             {
                 frame("opened");
@@ -202,7 +235,7 @@ namespace ReadyLauncher
                 timer.Tick += delegate { timer.Stop(); act(); };
                 timer.Start();
             };
-            int close = ElementAnimator.OverlayDuration(S.Animation, false, S.AnimationSpeed), open = ElementAnimator.OverlayDuration(S.Animation, true, S.AnimationSpeed);
+            int close = ElementAnimator.OverlayDuration(Anim, false, S.AnimationSpeed), open = ElementAnimator.OverlayDuration(Anim, true, S.AnimationSpeed);
             after(4000, () =>   // once the first opening and the sensor readings are done
             {
                 var rect = ScreenArea();   // taken while everything is showing
@@ -257,12 +290,12 @@ namespace ReadyLauncher
                     double span = times.Count > 1 ? times[times.Count - 1] - times[0] : 0;
                     System.IO.File.AppendAllText(file, string.Format(System.Globalization.CultureInfo.InvariantCulture,
                         "{0} {1}: {2} frames in {3:0} ms = {4:0} fps; longest gap {5:0} ms; gaps over 34 ms: {6}\r\n",
-                        S.Animation, what, times.Count, span, span > 0 ? (times.Count - 1) * 1000 / span : 0, worst, slow));
+                        Anim, what, times.Count, span, span > 0 ? (times.Count - 1) * 1000 / span : 0, worst, slow));
                     if (then != null) then();
                 });
             };
-            int close = ElementAnimator.OverlayDuration(S.Animation, false, S.AnimationSpeed);
-            int open = ElementAnimator.OverlayDuration(S.Animation, true, S.AnimationSpeed);
+            int close = ElementAnimator.OverlayDuration(Anim, false, S.AnimationSpeed);
+            int open = ElementAnimator.OverlayDuration(Anim, true, S.AnimationSpeed);
             after(4000, () =>
             {
                 measure("closing", close, null);
@@ -350,14 +383,14 @@ namespace ReadyLauncher
             {
                 ElementAnimator a;
                 if (animators.TryGetValue(w, out a)) a.Stop();   // also cancels a "hide when done" still pending
-                if (appearing && Animates(w)) { var an = AnimatorFor(w); if (an != null) an.Prepare(S.Animation); }
+                if (appearing && Animates(w)) { var an = AnimatorFor(w); if (an != null) an.Prepare(Anim); }
             }
         }
 
         void AnimateCompanionsIn()
         {
             foreach (var w in Companions())
-                if (w.IsVisible && Animates(w)) { var a = AnimatorFor(w); if (a != null) a.In(S.Animation, S.AnimationSpeed); }
+                if (w.IsVisible && Animates(w)) { var a = AnimatorFor(w); if (a != null) a.In(Anim, S.AnimationSpeed); }
         }
 
         /// <summary>Hides a window beside the launcher, with the animation when it's chosen to animate.</summary>
@@ -366,7 +399,7 @@ namespace ReadyLauncher
             if (w == null) return;
             var a = w.IsVisible && Animates(w) ? AnimatorFor(w) : null;
             if (a == null) { w.Hide(); return; }
-            a.Out(S.Animation, S.AnimationSpeed, () => w.Hide());
+            a.Out(Anim, S.AnimationSpeed, () => w.Hide());
         }
     }
 

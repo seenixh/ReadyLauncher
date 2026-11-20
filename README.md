@@ -82,8 +82,14 @@ setting's title, option or button for a short description of what it does (each 
 what it measures). It has six tabs:
 
 - **General**: open shortcut, launcher size (small, medium, large or a custom width x height in
-  pixels), open/close animation (fade, slide up, slide down, zoom, pop, blur, TV static, flip, digital rain, beam, glass, or none), its speed (25% to 300%) and which windows beside the launcher animate with it (all of them, or any of: notes, sensor bar, detached strip, outside volume control), volume
-  control (off, or inside/outside the launcher on either side), its size (small to extra large) and
+  pixels), open/close animation (fade, slide up, slide down, zoom, pop, blur, TV static, flip, digital rain, beam, glass, Randomize for a different one each time it opens, or none), its speed (25% to 300%) and which windows beside the launcher animate with it (all of them, or any of: notes, sensor bar, detached strip, outside volume control), volume
+  control (off, or inside/outside the launcher on either side), its size (small to extra large), its style (a slider,
+  or tick *Buttons* for a column of volume buttons that each set one volume, with the slider beside it for how many
+  (1 to 20, spread evenly from 100% down); the one for the volume now is lit; right-click a button to choose the
+  volume it sets; tick *Hide Slider* for the buttons alone; click the percentage under the slider to type an exact
+  volume), the volume buttons' height (small,
+  medium or large), *Close the launcher after choosing a
+  volume* (after clicking a volume button or moving the slider) and
   how far an outside volume control sits from the window, open icons with a double-click, hide-after-launch, hide-when-clicking-away,
   start with Windows, the **Settings theme** (a square button in each theme's color: follow system,
   light, light grey, grey, dark grey, dark or Christmas; you see each one right away; the text / line, keyboard
@@ -94,7 +100,9 @@ what it measures). It has six tabs:
   the launcher offers to download it, swaps it in and restarts by itself; your icons, notes and
   settings are kept.
 - **Appearance**: icon size (tiny, extra small, small, medium, large), names under icons, icon layout, scrolling on/off
-  (the scroll bar takes a shade of the background color), background color, background transparency
+  (the scroll bar takes a shade of the background color, and shows once the icons themselves reach the bottom
+  edge, with room below for their names and a spare row to drop more; it sits at the launcher's right edge, outside a volume control
+  inside the launcher, which stays put), background color, background transparency
   (icons stay solid), background picture and its transparency. **Disable** switches a picture off but keeps it chosen (its location stays in the box, greyed out); **Enable** switches it back on, and choosing a new picture with Browse switches it on too.
   **Theme**: a ready-made look for everything at once: the background picture and the colors of the launcher, its
   buttons, the volume control, icon names, the notes window, the quick launch strip, the sensor bar and the Settings window.
@@ -234,7 +242,7 @@ icon says so.
   `src/LauncherWindow.Icons.cs`: custom icons
 - `src/TileView.cs`: one icon; `src/IconCache.cs`: shell icon loading
 - `src/ShellHelper.cs`: launching, drag data, most-used / recently-installed lists
-- `src/VolumeControl.cs`: system volume (Core Audio) and the slider panel
+- `src/VolumeControl.cs`: system volume (Core Audio) and the slider / button panel
 - `src/SettingsWindow.cs` (`src/SettingsWindow.Help.cs`: the description for every setting), `src/InputDialog.cs`, `src/Models.cs`, `src/Native.cs`
 - `src/SettingsTheme.cs`: the Settings window's seven themes; `src/Themes.cs`: the launcher themes (Theme in Appearance) and the Christmas Lights picture they draw; `src/Updates.cs`: checking GitHub for a
   newer version and installing it

@@ -17,10 +17,12 @@ namespace ReadyLauncher
     public enum VolumePlacement { Off, InsideLeft, InsideRight, OutsideLeft, OutsideRight }
     public enum IconSizeMode { ExtraSmall, Small, Medium, Large, Tiny }   // Tiny was added later, so it comes last here
     public enum WindowSizeMode { Small, Medium, Large, Custom }
-    public enum OpenAnimation { None, Fade, SlideUp, SlideDown, Zoom, Pop, Blur, Static, Flip, Rain, Beam, Glass }   // Settings lists them in this order
+    public enum OpenAnimation { None, Fade, SlideUp, SlideDown, Zoom, Pop, Blur, Static, Flip, Rain, Beam, Glass, Random }   // Random: a different one each time it opens
     public enum NotesPlacement { Off, Left, Right }
     public enum DecorKind { Line, Text }
     public enum VolumeSizeMode { Small, Medium, Large, ExtraLarge }
+    public enum VolumeStyleMode { Slider, Buttons10, Buttons20, ButtonsCustom }
+    public enum VolumeButtonSize { Small, Medium, Large }
     public enum StripIconMode { MatchLauncher, ExtraSmall, Small, Medium, Large, ExtraLarge, Tiny }
     public enum SettingsThemeMode { FollowSystem, Light, LightGrey, Grey, DarkGrey, Dark, Christmas }   // saved by name, so the order can change
 
@@ -217,6 +219,72 @@ namespace ReadyLauncher
         // Volume control
         public int VolumeGap = 4;                 // pixels between the launcher and an outside volume control
         public VolumeSizeMode VolumeSize = VolumeSizeMode.Medium;
+        public VolumeStyleMode VolumeStyle = VolumeStyleMode.Slider;   // a slider, or a column of buttons that each set one volume
+        public bool VolumeSliderToo;              // buttons: show the slider beside them as well
+        public VolumeButtonSize VolumeButtonHeight = VolumeButtonSize.Small;   // how tall each volume button is
+        public bool VolumeCloseAfter;             // close the launcher after a volume button is clicked or the slider is moved
+        public List<int> VolumeButtons10 = new List<int>();   // your own volume for each of the 10 buttons, top to bottom (empty: 100, 90 ... 10)
+        public List<int> VolumeButtons20 = new List<int>();   // the same for 20 buttons (empty: 100, 95 ... 5)
+        public int VolumeButtonCount = 5;         // the Custom style: how many volume buttons, 1 to 20
+        public List<int> VolumeButtonsCustom = new List<int>();   // your own volume for each Custom button (empty, or made for another count: spread evenly)
+
+        public const int MaxVolumeButtons = 20;
+
+        /// <summary>
+        /// The volume each of <paramref name="count"/> buttons sets out of the box, spread evenly from 100% down:
+        /// 100, 90 ... 10; 100, 95 ... 5; or 100, 75, 50, 25.
+        /// </summary>
+        public static int[] DefaultVolumeSteps(int count)
+        {
+            count = Math.Max(1, Math.Min(MaxVolumeButtons, count));
+            var a = new int[count];
+            for (int i = 0; i < count; i++) a[i] = (int)Math.Round(100.0 * (count - i) / count, MidpointRounding.AwayFromZero);
+            return a;
+        }
+
+        /// <summary>How many volume buttons the chosen style has.</summary>
+        public int VolumeStepCount()
+        {
+            switch (VolumeStyle)
+            {
+                case VolumeStyleMode.Buttons20: return 20;
+                case VolumeStyleMode.ButtonsCustom: return Math.Max(1, Math.Min(MaxVolumeButtons, VolumeButtonCount));
+                default: return 10;
+            }
+        }
+
+        /// <summary>
+        /// Your own button volumes: 10 and 20 buttons keep their own (as the 10- and 20-button styles did), every other
+        /// number shares one list.
+        /// </summary>
+        List<int> OwnVolumeSteps()
+        {
+            int count = VolumeStepCount();
+            return count == 20 ? VolumeButtons20 : count == 10 ? VolumeButtons10 : VolumeButtonsCustom;
+        }
+
+        /// <summary>The volume each button of the chosen style sets, top to bottom: your own where you chose one.</summary>
+        public int[] VolumeSteps()
+        {
+            int count = VolumeStepCount();
+            var steps = DefaultVolumeSteps(count);
+            var own = OwnVolumeSteps();
+            if (own != null && own.Count == count)
+                for (int i = 0; i < count; i++) if (own[i] >= 0 && own[i] <= 100) steps[i] = own[i];
+            return steps;
+        }
+
+        /// <summary>Button <paramref name="index"/> (from the top) of the chosen style sets <paramref name="volume"/> from now on.</summary>
+        public void SetVolumeStep(int index, int volume)
+        {
+            int count = VolumeStepCount();
+            var steps = VolumeSteps();
+            if (index < 0 || index >= count) return;
+            steps[index] = Math.Max(0, Math.Min(100, volume));
+            var own = OwnVolumeSteps();
+            own.Clear();
+            if (!steps.SequenceEqual(DefaultVolumeSteps(count))) own.AddRange(steps);   // saved only when it differs
+        }
 
         // Quick launch strip icons (MatchLauncher follows the launcher's icon size)
         public StripIconMode StripIconSize = StripIconMode.MatchLauncher;
@@ -481,6 +549,10 @@ namespace ReadyLauncher
             Settings.SensorAlerts.RemoveAll(a => a == null || string.IsNullOrEmpty(a.Id));
             Settings.SensorGraphLength = Math.Max(10, Math.Min(240, Settings.SensorGraphLength));
             Settings.KnownSensors.RemoveAll(k => k == null || string.IsNullOrEmpty(k.Id));
+            if (Settings.VolumeButtons10 == null) Settings.VolumeButtons10 = new List<int>();
+            if (Settings.VolumeButtons20 == null) Settings.VolumeButtons20 = new List<int>();
+            if (Settings.VolumeButtonsCustom == null) Settings.VolumeButtonsCustom = new List<int>();
+            Settings.VolumeButtonCount = Math.Max(1, Math.Min(AppSettings.MaxVolumeButtons, Settings.VolumeButtonCount));
             if (string.IsNullOrWhiteSpace(Settings.PingHost)) Settings.PingHost = "1.1.1.1";
             Items.RemoveAll(i => i == null);
             foreach (var i in Items) if (i.Children == null) i.Children = new List<LauncherItem>();

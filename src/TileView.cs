@@ -73,6 +73,9 @@ namespace ReadyLauncher
 
         static Brush Frozen(SolidColorBrush b) { b.Freeze(); return b; }
 
+        /// <summary>How far below the tile's top its picture ends (above the name).</summary>
+        public double IconBottom { get { return BorderThickness.Top + Padding.Top + IconSize; } }
+
         /// <summary>Glow + grow when another icon is dragged on top (merge into folder).</summary>
         public void SetMergeTarget(bool on)
         {
