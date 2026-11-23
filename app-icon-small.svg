@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Ready Launcher icon, small sizes (16 to 32): the gold-framed Launch Grid, simplified to stay crisp</title>
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#B07A02"/>
+      <stop offset="0.25" stop-color="#FFD94C"/>
+      <stop offset="0.5" stop-color="#E2A504"/>
+      <stop offset="0.72" stop-color="#FFE47A"/>
+      <stop offset="1" stop-color="#B98300"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#363B40"/>
+      <stop offset="1" stop-color="#191B1D"/>
+    </linearGradient>
+    <linearGradient id="slot" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#737A80"/>
+      <stop offset="1" stop-color="#565C62"/>
+    </linearGradient>
+    <linearGradient id="arrow" gradientUnits="userSpaceOnUse" x1="284" y1="106" x2="406" y2="228">
+      <stop offset="0" stop-color="#FFE985"/>
+      <stop offset="0.5" stop-color="#FFC21A"/>
+      <stop offset="1" stop-color="#E29A00"/>
+    </linearGradient>
+  </defs>
+  <!-- a thick gold frame, the dark panel set into it -->
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#gold)"/>
+  <rect x="56" y="56" width="400" height="400" rx="76" fill="url(#tile)"/>
+  <!-- three apps and the gold arrow, bolder than at large sizes -->
+  <g transform="translate(256 256) scale(0.86) translate(-256 -256)">
+    <g fill="url(#slot)">
+      <rect x="104" y="104" width="136" height="136" rx="34"/>
+      <rect x="104" y="272" width="136" height="136" rx="34"/>
+      <rect x="272" y="272" width="136" height="136" rx="34"/>
+    </g>
+    <g fill="none" stroke="url(#arrow)" stroke-width="48" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M298 214 L392 120"/>
+      <path d="M312 120 H392 V200"/>
+    </g>
+  </g>
+</svg>

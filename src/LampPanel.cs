@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
+using System.Linq;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -26,6 +29,11 @@ namespace ReadyLauncher
         const double ModW = 32, PitchX = 5.8, PitchY = 5.0, Lens = 3.8, Pad = 8;
         const double TierH = 17.5;
         const double SillTop = 45, SillBottom = 52;   // the strip's own sill (not when filling a space)
+        public const double SillTopY = SillTop;
+        const double SparsePitchX = 8.4, SparsePitchY = 7.4, SparseMargin = 5;   // the monitor's window: lamps well apart
+        const double ScrollSpeed = 11;              // text scrolling: lamp columns a second
+        const int ScrollGap = 12;                   // dark columns after the text before it comes round again
+        const double FlashOn = 1.4, FlashOff = 0.45;   // text flashing: seconds lit, then dark
         const int FrameMs = 40;   // 25 frames a second
         static readonly double[] BasePeriod = { 3.2, 0.22, 0.28, 0.12 };   // steady, shift register, counter, flicker
 
@@ -39,14 +47,20 @@ namespace ReadyLauncher
 
         readonly DispatcherTimer timer;
         readonly Stopwatch clock = new Stopwatch();
-        readonly LampActivity mode;
-        readonly bool fill;
+        static readonly List<LampPanel> onScreen = new List<LampPanel>();
+        LampActivity activity;   // as chosen
+        LampActivity current;    // what the lamps are doing now: the chosen one, or for Random the one it has switched to
+        double sweepStart;
+        readonly bool fill, sparse;
         double builtWidth = -1, builtHeight = -1, modX0, simTime, last;
         double sx = 1, sy = 1, spritesSx, spritesSy;
         double plateTop, plateBottom;
         int tiers, mods, n, units, pw, ph;
-        double[] lx, ly, lb, lmax, avg;
-        byte[] lon, lcol;
+        double[] lx, ly, lb, lmax, avg, lsweep;
+        byte[] lon, lcol, lhere;
+        int[] lgx, lgy;          // each lamp's column and row in the strip's grid (for spelling text)
+        int gridCols, gridRows;
+        int sweepSpan;   // how many steps an alert's band of light moves through, end to end
         byte[] uKind;
         double[] uPeriod, uTimer;
         sbyte[] uDir;
@@ -59,19 +73,185 @@ namespace ReadyLauncher
         /// <summary>Rounded corners to clip to, where the strip meets a rounded edge.</summary>
         public CornerRadius Corners { get; set; }
 
+        /// <summary>Room at the left or right end kept free of lamps (where the monitor stands): a plain panel instead.</summary>
+        public double ReserveLeft { get; set; }
+        public double ReserveRight { get; set; }
+
         /// <param name="fill">Fill the space it's given (as a background) instead of being its own 52-high strip.</param>
-        public LampPanel(LampActivity mode, bool fill = false)
+        /// <param name="sparse">The monitor's window: fills its space with lamps spaced well apart, fewer of them lit.</param>
+        public LampPanel(LampActivity mode, bool fill = false, bool sparse = false)
         {
-            this.mode = mode;
-            this.fill = fill;
-            if (!fill) Height = PanelHeight;
+            activity = mode;
+            current = mode == LampActivity.Random ? RandomNow() : mode;
+            this.sparse = sparse;
+            this.fill = fill || sparse;
+            if (!this.fill) Height = PanelHeight;
             ClipToBounds = true;
             IsHitTestVisible = false;
             timer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(FrameMs) };
             timer.Tick += delegate { Tick(); };
             IsVisibleChanged += delegate { UpdateRunning(); };
-            Loaded += delegate { UpdateRunning(); };
-            Unloaded += delegate { timer.Stop(); clock.Stop(); };
+            Loaded += delegate { if (!onScreen.Contains(this)) onScreen.Add(this); UpdateRunning(); };
+            Unloaded += delegate { onScreen.Remove(this); timer.Stop(); clock.Stop(); };
+        }
+
+        /// <summary>Filling a space (behind the quick launch icons) rather than being its own strip.</summary>
+        public bool Fills { get { return fill && !sparse; } }
+
+        /// <summary>The lamps in the monitor's window.</summary>
+        public bool InMonitor { get { return sparse; } }
+
+        /// <summary>Every lamp strip shown right now (in the launcher, its own window or the quick launch strip).</summary>
+        public static List<LampPanel> OnScreen { get { return onScreen.ToList(); } }
+
+        /// <summary>How busy the lamps look. Random switches between idle, computing and alert on its own now and then.</summary>
+        public LampActivity Activity
+        {
+            get { return activity; }
+            set
+            {
+                if (value == activity) return;
+                activity = value;
+                var now = value == LampActivity.Random ? RandomNow() : value;
+                if (now != current) { current = now; sweepStart = simTime; }   // an alert's first sweep starts from the left end
+            }
+        }
+
+        /// <summary>What the lamps are doing right now: the chosen activity, or the one Random has switched to.</summary>
+        public LampActivity Current { get { return current; } }
+
+        // Random: one turn for every strip on screen (the strip and its monitor), so they all switch together.
+        static readonly Stopwatch randomClock = Stopwatch.StartNew();
+        static LampActivity randomNow;
+        static double randomNext = -1;
+
+        /// <summary>Random: starts a new turn right away, on one of idle, computing and alert other than <paramref name="avoid"/>.</summary>
+        public static void NewRandomTurn(LampActivity avoid)
+        {
+            var choices = new List<LampActivity> { LampActivity.Idle, LampActivity.Computing, LampActivity.Alert };
+            choices.Remove(avoid);
+            randomNow = choices[rnd.Next(choices.Count)];
+            randomNext = randomClock.Elapsed.TotalSeconds + RandomSeconds();
+        }
+
+        // Text spelled out on the strips (not the monitor), the same on every strip on screen.
+        static string text = "";
+        static LampTextEffect textEffect;
+        static int textVersion;
+        static bool textSides;   // the lamps on either side of the text keep blinking
+        int seenText = -1, seenCols = -1;
+        int textFrom, textTo;    // the columns the text has to itself right now (all of them, unless blinking beside it)
+        List<byte> textCols;
+        List<string> textLines;   // flashing: the lines shown one after another
+        double textClock;
+
+        /// <summary>
+        /// Spells <paramref name="words"/> on the strips, scrolling or flashing, instead of blinking (None: blinking
+        /// again). With <paramref name="sides"/>, the lamps on either side of the text keep blinking.
+        /// </summary>
+        public static void ShowText(string words, LampTextEffect effect, bool sides)
+        {
+            words = (words ?? "").Trim();
+            textSides = sides;
+            if (words == text && effect == textEffect) return;
+            text = words;
+            textEffect = effect;
+            textVersion++;
+        }
+
+        /// <summary>Spelling text right now (it needs a strip at least six lamps high).</summary>
+        bool ShowingText { get { return !sparse && textEffect != LampTextEffect.None && text.Length > 0 && gridRows >= LampFont.Height; } }
+
+        /// <summary>Lights the lamps that spell the text where it has got to: scrolling in from the right, or flashing.</summary>
+        void StepText(double dt)
+        {
+            if (seenText != textVersion || seenCols != gridCols)
+            {
+                seenText = textVersion;
+                seenCols = gridCols;
+                textCols = LampFont.Columns(text);
+                textLines = LampFont.Lines(text, gridCols / Cols);
+                textClock = 0;
+            }
+            textClock += dt;
+            List<byte> shown;
+            int x0, width;
+            if (textEffect == LampTextEffect.Flash)
+            {
+                // As many words as fit, centered, lit then dark; then the next words. Each letter gets a module of
+                // its own (they're a letter wide), so the gaps between modules never cut through a letter.
+                double each = FlashOn + FlashOff;
+                int k = (int)(textClock / each) % Math.Max(1, textLines.Count);
+                bool lit = textClock % each < FlashOn;
+                string line = textLines.Count > 0 ? textLines[k] : "";
+                var cells = LampFont.CellColumns(line, Cols);
+                shown = lit && line.Length > 0 ? cells : null;
+                x0 = (gridCols / Cols - line.Length) / 2 * Cols;
+                // Its edges are its first and last lit columns (a narrow letter doesn't fill its whole module).
+                int first = cells.FindIndex(b => b != 0), last = cells.FindLastIndex(b => b != 0);
+                if (first < 0) width = 0;
+                else { x0 += first; width = last - first + 1; shown = shown == null ? null : cells.GetRange(first, width); }
+            }
+            else
+            {
+                // In from the right edge, out past the left, a short dark gap, and round again.
+                int period = gridCols + textCols.Count + ScrollGap;
+                int step = (int)(textClock * ScrollSpeed) % period;
+                shown = textCols;
+                width = textCols.Count;
+                x0 = gridCols - step;
+            }
+            // Blinking beside the text: the text keeps just its own columns, from its first lit column to its last
+            // (moving along with scrolling text), and the rest of the strip blinks as usual right up to its edges,
+            // all of it while scrolling text is off the strip.
+            if (textSides)
+            {
+                bool onStrip = width > 0 && x0 + width > 0 && x0 < gridCols;
+                textFrom = onStrip ? Math.Max(0, x0) : 0;
+                textTo = onStrip ? Math.Min(gridCols, x0 + width) : 0;
+            }
+            else
+            {
+                textFrom = 0;
+                textTo = gridCols;
+            }
+            int top = (gridRows - LampFont.Height) / 2;
+            for (int i = 0; i < n; i++)
+            {
+                if (lgx[i] < textFrom || lgx[i] >= textTo) continue;   // blinking as usual
+                int row = lgy[i] - top, col = lgx[i] - x0;
+                bool on = shown != null && row >= 0 && row < LampFont.Height && col >= 0 && col < shown.Count && ((shown[col] >> row) & 1) != 0;
+                lon[i] = (byte)(on ? 1 : 0);
+            }
+        }
+
+        /// <summary>Test copies: the columns the text has to itself ("from-to", end not included).</summary>
+        public string TextStretch { get { return ShowingText ? textFrom + "-" + textTo : "no text"; } }
+
+        /// <summary>Test copies: the strip's lamps as rows of # (glowing) and . (dark).</summary>
+        public string[] LitRows()
+        {
+            if (sparse || n == 0) return new string[0];
+            var rows = new char[gridRows][];
+            for (int r = 0; r < gridRows; r++) rows[r] = new string('.', gridCols).ToCharArray();
+            for (int i = 0; i < n; i++) if (lb[i] >= 0.5) rows[lgy[i]][lgx[i]] = '#';   // what's glowing (an alert's sweep included)
+            return rows.Select(r => new string(r)).ToArray();
+        }
+
+        static LampActivity RandomNow()
+        {
+            if (randomNext < 0) NewRandomTurn(LampActivity.Random);   // the first turn: any of the three
+            else if (randomClock.Elapsed.TotalSeconds >= randomNext) NewRandomTurn(randomNow);
+            return randomNow;
+        }
+
+        /// <summary>Random: how long each activity lasts, 20 to 60 seconds (test copies can set it).</summary>
+        static double RandomSeconds()
+        {
+            double s;
+            if (Program.TestMode && double.TryParse(Environment.GetEnvironmentVariable("READYLAUNCHER_LAMP_SWITCH") ?? "",
+                    NumberStyles.Float, CultureInfo.InvariantCulture, out s) && s > 0) return s;
+            return 20 + rnd.NextDouble() * 40;
         }
 
         protected override void OnRenderSizeChanged(SizeChangedInfo info)
@@ -124,7 +304,29 @@ namespace ReadyLauncher
             builtHeight = height;
             sx = dpi.DpiScaleX;
             sy = dpi.DpiScaleY;
+            if (sparse) LayOutSparse(width, height); else LayOutModules(width, height);
 
+            pw = Math.Max(1, (int)Math.Ceiling(width * sx));
+            ph = Math.Max(1, (int)Math.Ceiling(height * sy));
+            background = Render(pw, ph, BuildStill(width, height));
+            frame = new uint[pw * ph];
+            wb = new WriteableBitmap(pw, ph, 96 * sx, 96 * sy, PixelFormats.Pbgra32, null);
+            if (spritesSx != sx || spritesSy != sy) MakeSprites();
+            Clip = Shapes.AnyRounding(Corners) ? Shapes.Rounded(new Rect(0, 0, width, height), Corners) : null;
+            InvalidateVisual();
+        }
+
+        void Allocate()
+        {
+            lx = new double[n]; ly = new double[n]; lb = new double[n]; lmax = new double[n]; lsweep = new double[n];
+            lgx = new int[n]; lgy = new int[n];
+            lon = new byte[n]; lcol = new byte[n]; lhere = new byte[n];
+            uKind = new byte[units]; uPeriod = new double[units]; uTimer = new double[units]; uDir = new sbyte[units]; uVal = new int[units];
+        }
+
+        /// <summary>The strip: modules of 5 x 3 lamps side by side, in tiers.</summary>
+        void LayOutModules(double width, double height)
+        {
             if (fill)
             {
                 tiers = Math.Max(1, (int)((height - 4) / TierH));
@@ -136,14 +338,16 @@ namespace ReadyLauncher
                 plateTop = 8;
             }
             plateBottom = plateTop + tiers * TierH;
-            mods = Math.Max(1, (int)((width - 2 * Pad) / ModW));
-            modX0 = (width - mods * ModW) / 2;
+            double usable = Math.Max(0, width - 2 * Pad - ReserveLeft - ReserveRight);
+            mods = Math.Max(1, (int)(usable / ModW));
+            modX0 = ReserveLeft + Pad + (usable - mods * ModW) / 2;
             units = mods * tiers * Rows;
             n = units * Cols;
-            lx = new double[n]; ly = new double[n]; lb = new double[n]; lmax = new double[n];
-            lon = new byte[n]; lcol = new byte[n];
-            uKind = new byte[units]; uPeriod = new double[units]; uTimer = new double[units]; uDir = new sbyte[units]; uVal = new int[units];
+            Allocate();
             avg = new double[mods * tiers];
+            sweepSpan = mods;
+            gridCols = mods * Cols;
+            gridRows = tiers * Rows;
             var lr = new Random(1979);   // the same layout every time
             for (int t = 0; t < tiers; t++)
                 for (int m = 0; m < mods; m++)
@@ -168,18 +372,58 @@ namespace ReadyLauncher
                             lmax[i] = lr.NextDouble() < 0.008 ? 0 : 0.72 + lr.NextDouble() * 0.28;   // a few burned out, the rest a little uneven
                             lon[i] = (byte)(lr.NextDouble() < 0.45 ? 1 : 0);
                             lb[i] = lon[i];
+                            lhere[i] = 1;
+                            lsweep[i] = m;
+                            lgx[i] = m * Cols + c;
+                            lgy[i] = t * Rows + r;
                         }
                     }
                 }
+        }
 
-            pw = Math.Max(1, (int)Math.Ceiling(width * sx));
-            ph = Math.Max(1, (int)Math.Ceiling(height * sy));
-            background = Render(pw, ph, BuildStill(width, height));
-            frame = new uint[pw * ph];
-            wb = new WriteableBitmap(pw, ph, 96 * sx, 96 * sy, PixelFormats.Pbgra32, null);
-            if (spritesSx != sx || spritesSy != sy) MakeSprites();
-            Clip = Shapes.AnyRounding(Corners) ? Shapes.Rounded(new Rect(0, 0, width, height), Corners) : null;
-            InvalidateVisual();
+        /// <summary>
+        /// The monitor's window: lamps spaced well apart in rows (each row in runs of 5 that behave like the strip's
+        /// rows), some places with no lamp at all, mostly amber.
+        /// </summary>
+        void LayOutSparse(double width, double height)
+        {
+            int groups = Math.Max(1, ((int)((width - 2 * SparseMargin) / SparsePitchX) + 1) / Cols);
+            int rows = Math.Max(1, (int)((height - 2 * SparseMargin) / SparsePitchY) + 1);
+            int cols = groups * Cols;
+            tiers = 0;
+            mods = 0;
+            units = rows * groups;
+            n = units * Cols;
+            Allocate();
+            avg = new double[0];
+            sweepSpan = cols;
+            gridCols = cols;
+            gridRows = 0;   // the monitor doesn't spell text
+            double x0 = (width - (cols - 1) * SparsePitchX) / 2, y0 = (height - (rows - 1) * SparsePitchY) / 2;
+            var lr = new Random(1983);   // the same layout every time
+            for (int r = 0; r < rows; r++)
+                for (int g = 0; g < groups; g++)
+                {
+                    int u = r * groups + g;
+                    double k = lr.NextDouble();
+                    uKind[u] = (byte)(k < 0.35 ? 0 : k < 0.6 ? 1 : k < 0.68 ? 2 : 3);
+                    uPeriod[u] = BasePeriod[uKind[u]] * (0.8 + lr.NextDouble() * 1.2);   // a little more unhurried than the strip
+                    uTimer[u] = lr.NextDouble() * uPeriod[u];
+                    uDir[u] = (sbyte)(lr.NextDouble() < 0.5 ? 1 : -1);
+                    uVal[u] = lr.Next(32);
+                    for (int c = 0; c < Cols; c++)
+                    {
+                        int i = u * Cols + c, col = g * Cols + c;
+                        lx[i] = x0 + col * SparsePitchX;
+                        ly[i] = y0 + r * SparsePitchY;
+                        lcol[i] = (byte)(lr.NextDouble() < 0.7 ? 1 : 0);
+                        lhere[i] = (byte)(lr.NextDouble() < 0.7 ? 1 : 0);
+                        lmax[i] = 0.75 + lr.NextDouble() * 0.25;
+                        lon[i] = (byte)(lr.NextDouble() < 0.2 ? 1 : 0);
+                        lb[i] = lon[i];
+                        lsweep[i] = col;
+                    }
+                }
         }
 
         static void Params(LampActivity a, out double slow, out double density)
@@ -235,9 +479,16 @@ namespace ReadyLauncher
         {
             if (n == 0) return;
             simTime += dt;
+            if (activity == LampActivity.Random)
+            {
+                var now = RandomNow();
+                if (now != current) { current = now; sweepStart = simTime; }
+            }
             double slow, density;
-            Params(mode, out slow, out density);
-            for (int u = 0; u < units; u++)
+            Params(current, out slow, out density);
+            if (sparse) density *= 0.5;   // the monitor: fewer lamps lit
+            bool spelling = ShowingText, sides = spelling && textSides;
+            if (!spelling || sides) for (int u = 0; u < units; u++)   // the rows' own blinking (then the text, over its stretch)
             {
                 uTimer[u] -= dt;
                 int guard = 0;
@@ -248,19 +499,24 @@ namespace ReadyLauncher
                 }
                 if (uTimer[u] <= 0) uTimer[u] = uPeriod[u] * slow;
             }
-            // Alert: a band of light sweeps along the strip about every 1.8 s (a moving band, never the whole strip at once).
+            if (spelling) StepText(dt);
+            // Alert: a band of light sweeps along the strip about every 1.8 s (a moving band, never the whole strip at once),
+            // passing by any text.
             double front = -99;
-            if (mode == LampActivity.Alert)
+            if (current == LampActivity.Alert && (!spelling || sides))
             {
-                double phase = (simTime % 1.8) / 0.9;
-                if (phase <= 1) front = -1 + phase * (mods + 1);
+                double phase = ((simTime - sweepStart) % 1.8) / 0.9;
+                if (phase <= 1) front = -1 + phase * (sweepSpan + 1);
             }
+            // Lamps spelling text fade quicker, so moving letters stay sharp instead of trailing light.
             double kOn = 1 - Math.Exp(-dt / 0.03), kOff = 1 - Math.Exp(-dt / 0.12);
+            double tOn = 1 - Math.Exp(-dt / 0.02), tOff = 1 - Math.Exp(-dt / 0.045);
             for (int i = 0; i < n; i++)
             {
+                bool inText = spelling && lgx[i] >= textFrom && lgx[i] < textTo;
                 double target = lon[i];
-                if (front > -50 && Math.Abs((i / (Rows * Cols)) % mods - front) < 0.7) target = 1;
-                lb[i] += (target - lb[i]) * (target > lb[i] ? kOn : kOff);
+                if (front > -50 && !inText && Math.Abs(lsweep[i] - front) < 0.7) target = 1;
+                lb[i] += (target - lb[i]) * (target > lb[i] ? (inText ? tOn : kOn) : (inText ? tOff : kOff));
             }
         }
 
@@ -276,26 +532,36 @@ namespace ReadyLauncher
         {
             if (n == 0 || wb == null) return;
             Array.Copy(background, frame, frame.Length);
-            Array.Clear(avg, 0, avg.Length);
-            for (int i = 0; i < n; i++) avg[i / (Rows * Cols)] += lb[i] * lmax[i];
-            for (int k = 0; k < avg.Length; k++) avg[k] /= Rows * Cols;
-
-            // light on the hood's underside, and a haze around each module
-            if (!fill)
-                for (int m = 0; m < mods; m++)
-                {
-                    int lv = Level(avg[m]);
-                    if (lv > 0) Add(hoodSpr[lv], modX0 + (m + 0.5) * ModW, 3);
-                }
-            for (int k = 0; k < avg.Length; k++)
+            if (!sparse)
             {
-                int lv = Level(avg[k]);
-                if (lv > 0) Add(hazeSpr[lv], modX0 + (k % mods + 0.5) * ModW, plateTop + (k / mods + 0.5) * TierH);
+                Array.Clear(avg, 0, avg.Length);
+                for (int i = 0; i < n; i++) avg[i / (Rows * Cols)] += lb[i] * lmax[i];
+                for (int k = 0; k < avg.Length; k++) avg[k] /= Rows * Cols;
+
+                // light on the hood's underside, and a haze around each module
+                if (!fill)
+                    for (int m = 0; m < mods; m++)
+                    {
+                        int lv = Level(avg[m]);
+                        if (lv > 0) Add(hoodSpr[lv], modX0 + (m + 0.5) * ModW, 3);
+                    }
+                for (int k = 0; k < avg.Length; k++)
+                {
+                    int lv = Level(avg[k]);
+                    if (lv > 0) Add(hazeSpr[lv], modX0 + (k % mods + 0.5) * ModW, plateTop + (k / mods + 0.5) * TierH);
+                }
             }
-            // the lamps, then their glow
-            for (int i = 0; i < n; i++) Over(lensSpr[lcol[i]][Level(lb[i] * lmax[i])], lx[i], ly[i]);
+            // the lamps, then their glow (behind the monitor's dark glass, an unlit lamp can't be seen)
             for (int i = 0; i < n; i++)
             {
+                if (lhere[i] == 0) continue;
+                int lv = Level(lb[i] * lmax[i]);
+                if (sparse && lv == 0) continue;
+                Over(lensSpr[lcol[i]][lv], lx[i], ly[i]);
+            }
+            for (int i = 0; i < n; i++)
+            {
+                if (lhere[i] == 0) continue;
                 double b = lb[i] * lmax[i];
                 if (b >= 0.08) Add(glowSpr[lcol[i]][Level(b)], lx[i], ly[i]);
             }
@@ -450,6 +716,16 @@ namespace ReadyLauncher
             var dg = new DrawingGroup();
             using (var dc = dg.Open())
             {
+                if (sparse) SparseStill(dc, w, h);
+                else ModuleStill(dc, w, h);
+            }
+            dg.Freeze();
+            return dg;
+        }
+
+        void ModuleStill(DrawingContext dc, double w, double h)
+        {
+            {
                 double pwDip = mods * ModW;
                 dc.DrawRectangle(Vertical("#060708", "#0d0f10"), null, new Rect(0, 0, w, h));
                 dc.DrawRectangle(Hex("#151718"), null, new Rect(modX0 - 5, plateTop - 3, pwDip + 10, plateBottom - plateTop + 6));
@@ -475,6 +751,10 @@ namespace ReadyLauncher
                     // the glossy sill below
                     dc.DrawRectangle(Vertical("#111416", "#2e3438"), null, new Rect(0, SillTop, w, SillBottom - SillTop));
                     dc.DrawRectangle(Frozen(new SolidColorBrush(Color.FromArgb(34, 255, 255, 255))), null, new Rect(0, SillTop, w, 0.8));
+                    // Toward the monitor: one plain panel from the last module's divider to the strip's end (it runs on
+                    // behind the monitor), the full height from under the hood's lip down to the sill.
+                    if (ReserveRight > 0) BlankPanel(dc, modX0 + pwDip + 0.8, w);
+                    if (ReserveLeft > 0) BlankPanel(dc, 0, modX0 - 0.8);
                 }
                 else
                 {
@@ -483,8 +763,31 @@ namespace ReadyLauncher
                     dc.DrawRectangle(Frozen(new LinearGradientBrush(Color.FromArgb(0, 0, 0, 0), Color.FromArgb(120, 0, 0, 0), 90)), null, new Rect(0, h - Math.Min(6, h / 3), w, Math.Min(6, h / 3)));
                 }
             }
-            dg.Freeze();
-            return dg;
+        }
+
+        /// <summary>
+        /// A plain panel, the full height of the strip's front from under the hood's lip down to the sill, in the
+        /// modules' finish (lighter at the top, darker at the bottom), with a touch of shade just under the lip.
+        /// </summary>
+        void BlankPanel(DrawingContext dc, double x0, double x1)
+        {
+            if (x1 - x0 < 2) return;
+            dc.DrawRectangle(Vertical("#2b2f31", "#232729"), null, new Rect(x0, 4, x1 - x0, SillTop - 4));
+            dc.DrawRectangle(Frozen(new LinearGradientBrush(Color.FromArgb(120, 0, 0, 0), Color.FromArgb(0, 0, 0, 0), 90)), null, new Rect(x0, 4, x1 - x0, 3));
+        }
+
+        /// <summary>The monitor's window: black glass with faint ribs behind it, set back into the case.</summary>
+        void SparseStill(DrawingContext dc, double w, double h)
+        {
+            dc.DrawRectangle(Vertical("#030303", "#0b0807"), null, new Rect(0, 0, w, h));
+            var rib = Frozen(new SolidColorBrush(Color.FromArgb(9, 255, 236, 220)));
+            for (double x = 1.2; x < w; x += 2.6) dc.DrawRectangle(rib, null, new Rect(x, 0, 0.5, h));
+            var socket = Hex("#0d0706");
+            for (int i = 0; i < n; i++) if (lhere[i] == 1) dc.DrawEllipse(socket, null, new Point(lx[i], ly[i]), 2.0, 2.0);
+            double top = Math.Min(9, h / 3), side = Math.Min(7, w / 4);
+            dc.DrawRectangle(Frozen(new LinearGradientBrush(Color.FromArgb(220, 0, 0, 0), Color.FromArgb(0, 0, 0, 0), 90)), null, new Rect(0, 0, w, top));
+            dc.DrawRectangle(Frozen(new LinearGradientBrush(Color.FromArgb(150, 0, 0, 0), Color.FromArgb(0, 0, 0, 0), 0)), null, new Rect(0, 0, side, h));
+            dc.DrawRectangle(Frozen(new LinearGradientBrush(Color.FromArgb(0, 0, 0, 0), Color.FromArgb(150, 0, 0, 0), 0)), null, new Rect(w - side, 0, side, h));
         }
 
         // ---------- colors ----------

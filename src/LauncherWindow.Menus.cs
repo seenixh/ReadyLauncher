@@ -87,10 +87,17 @@ namespace ReadyLauncher
 
         static void ShowMenu(FrameworkElement anchor, IEnumerable<object> items)
         {
-            var menu = new ContextMenu();
-            foreach (var i in items) menu.Items.Add(i);
+            var menu = BuildMenu(items);
             if (anchor != null) { menu.PlacementTarget = anchor; menu.Placement = PlacementMode.Bottom; }
             menu.IsOpen = true;
+        }
+
+        /// <summary>A right-click menu in the theme's colors, its headings as plain labels.</summary>
+        static ContextMenu BuildMenu(IEnumerable<object> items)
+        {
+            var menu = SettingsTheme.ThemeMenu(new ContextMenu());
+            foreach (var i in items) menu.Items.Add(SettingsTheme.MenuEntry(i));
+            return menu;
         }
 
         static MenuItem Item(string header, Action action, bool isChecked, string glyph)
@@ -193,6 +200,12 @@ namespace ReadyLauncher
 
         void ShowCanvasMenu(Point at)
         {
+            ShowMenu(null, CanvasMenuItems(at));
+        }
+
+        /// <summary>The menu for an empty spot on the icon area.</summary>
+        List<object> CanvasMenuItems(Point at)
+        {
             var items = AddMenuItems(at);
             items.Add(new Separator());
             if (SelectionCount > 0) items.AddRange(SelectionMenuItems());
@@ -207,17 +220,81 @@ namespace ReadyLauncher
             items.Add(inBackground ? Item("Keep on top again", KeepOnTop) : Item("Send to background (stay open behind other windows)", SendToBackground));
             items.Add(new Separator());
             var arrange = new MenuItem { Header = "Arrange icons" };
-            foreach (var i in ArrangeMenuItems()) arrange.Items.Add(i);
+            foreach (var i in ArrangeMenuItems()) arrange.Items.Add(SettingsTheme.MenuEntry(i));
             items.Add(arrange);
             var notes = new MenuItem { Header = "Notes window" };
-            foreach (var i in NotesMenuItems()) notes.Items.Add(i);
+            foreach (var i in NotesMenuItems()) notes.Items.Add(SettingsTheme.MenuEntry(i));
             items.Add(notes);
             items.Add(new Separator());
             items.Add(Item("Settings...", () => app.OpenSettings(), false, ""));
-            ShowMenu(null, items);
+            return items;
+        }
+
+        /// <summary>
+        /// Test copies only: the empty-spot menu, an icon's menu and the lamp strip's menu, drawn off screen (no menu
+        /// is opened) in each Settings theme, side by side, saved as one picture.
+        /// </summary>
+        void SaveMenuPictures(string file)
+        {
+            var wait = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            wait.Tick += delegate
+            {
+                wait.Stop();
+                var keep = SettingsTheme.MenuMode;
+                var modes = new[] { SettingsThemeMode.Light, SettingsThemeMode.LightGrey, SettingsThemeMode.Grey, SettingsThemeMode.DarkGrey, SettingsThemeMode.Dark, SettingsThemeMode.Christmas };
+                var tile = tiles.Values.FirstOrDefault(v => v.Item.Kind != ItemKind.Folder);
+                var columns = new List<List<System.Windows.Media.Imaging.BitmapSource>>();
+                foreach (var mode in modes)
+                {
+                    SettingsTheme.MenuMode = mode;
+                    var col = new List<System.Windows.Media.Imaging.BitmapSource>();
+                    col.Add(MenuPicture(BuildMenu(CanvasMenuItems(new Point(20, 20)))));
+                    if (tile != null) col.Add(MenuPicture(BuildMenu(ItemMenuItems(tile, DragOrigin.Canvas))));
+                    col.Add(MenuPicture(BuildMenu(LampMenuItems())));
+                    columns.Add(col);
+                }
+                SettingsTheme.MenuMode = keep;
+                double colW = columns.Max(c => c.Max(b => b.Width)) + 16, height = columns.Max(c => c.Sum(b => b.Height + 12)) + 40;
+                var dv = new DrawingVisual();
+                using (var dc = dv.RenderOpen())
+                {
+                    dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(0x2c, 0x33, 0x2a)), null, new Rect(0, 0, colW * columns.Count, height));
+                    for (int k = 0; k < columns.Count; k++)
+                    {
+                        var label = new FormattedText(modes[k].ToString(), System.Globalization.CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
+                            new Typeface("Segoe UI"), 14, Brushes.White, 1.0);
+                        dc.DrawText(label, new Point(k * colW + 10, 10));
+                        double y = 36;
+                        foreach (var b in columns[k]) { dc.DrawImage(b, new Rect(k * colW + 8, y, b.Width, b.Height)); y += b.Height + 12; }
+                    }
+                }
+                var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(colW * columns.Count), (int)Math.Ceiling(height), 96, 96, PixelFormats.Pbgra32);
+                rtb.Render(dv);
+                var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rtb));
+                using (var fs = System.IO.File.Create(file)) enc.Save(fs);
+            };
+            wait.Start();
+        }
+
+        /// <summary>Test copies only: a menu laid out and drawn on its own, never opened.</summary>
+        static System.Windows.Media.Imaging.BitmapSource MenuPicture(ContextMenu menu)
+        {
+            menu.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            menu.Arrange(new Rect(menu.DesiredSize));
+            menu.UpdateLayout();
+            var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(menu.ActualWidth), (int)Math.Ceiling(menu.ActualHeight), 96, 96, PixelFormats.Pbgra32);
+            rtb.Render(menu);
+            rtb.Freeze();
+            return rtb;
         }
 
         void ShowItemMenu(TileView t, DragOrigin origin)
+        {
+            ShowMenu(null, ItemMenuItems(t, origin));
+        }
+
+        List<object> ItemMenuItems(TileView t, DragOrigin origin)
         {
             var it = t.Item;
             var items = new List<object>();
@@ -230,8 +307,7 @@ namespace ReadyLauncher
                 items.Add(IconMenu(it));
                 items.Add(new Separator());
                 items.Add(Item("Remove folder from launcher", () => RemoveItem(it), false, ""));
-                ShowMenu(null, items);
-                return;
+                return items;
             }
             if (it.Kind == ItemKind.Keys)
             {
@@ -254,6 +330,9 @@ namespace ReadyLauncher
             {
                 items.Add(new Separator());
                 items.Add(Item("Add to launcher", () => AddItems(new[] { it.CloneShortcut() }, null), false, ""));
+                var hide = Item("Remove from quick launch", () => HideFromDock(it), false, "");
+                hide.ToolTip = "Stop showing this app in " + DockListName(S.Dock) + " (it still shows in the other list). To bring it back, right-click the round button on the strip.";
+                items.Add(hide);
             }
             else
             {
@@ -263,7 +342,7 @@ namespace ReadyLauncher
                     items.Add(Item("Move out of folder", () => { var f = openFolder; CloseFolder(); RemoveFromFolder(f, it, null, true); }, false, ""));
                 items.Add(Item("Remove from launcher", () => RemoveItem(it), false, ""));
             }
-            ShowMenu(null, items);
+            return items;
         }
 
         // ---------- commands ----------

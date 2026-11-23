@@ -59,7 +59,7 @@ namespace ReadyLauncher
                 Full = a.Full, WindowTransparency = a.WindowTransparency, DockTransparency = a.DockTransparency,
                 Animation = a.Animation, AnimationSpeed = a.AnimationSpeed,
                 AnimateNotes = a.AnimateNotes, AnimateSensors = a.AnimateSensors, AnimateDock = a.AnimateDock, AnimateVolume = a.AnimateVolume,
-                LampPanel = a.LampPanel, LampMode = a.LampMode
+                LampPanel = a.LampPanel, LampMode = a.LampMode, LampMonitor = a.LampMonitor
             };
         }
 

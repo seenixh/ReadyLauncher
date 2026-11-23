@@ -83,6 +83,7 @@ namespace ReadyLauncher
             PreviewKeyDown += OnKey;
             LocationChanged += delegate { PlaceSatellites(); };
             SizeChanged += delegate { PlaceSatellites(); };
+            IsVisibleChanged += delegate { if (IsVisible) ApplyLampText(); };   // a reminder that came due while hidden
             Closing += OnClosing;
         }
 
@@ -164,6 +165,7 @@ namespace ReadyLauncher
 
         public void ApplySettings()
         {
+            SettingsTheme.MenuMode = S.SettingsTheme;   // right-click menus in the Settings theme's colors
             bg = ParseColor(S.BackgroundColor, Color.FromRgb(0xB8, 0xA6, 0x00));
             // Text color follows what is actually behind it: the color, blended with the picture if there is one.
             string picture = S.BackgroundImageOff ? "" : S.BackgroundImage;   // a switched-off picture isn't shown
@@ -187,14 +189,11 @@ namespace ReadyLauncher
             // the bottom (inside an attached quick launch strip). Outside the launcher it has its own window; on the
             // quick launch strip, see BuildDockArea.
             LampPanel lampStrip = null;
+            ApplyLampText();   // what the strips spell, if anything
             if (S.LampPanel == LampPanelPlace.Top || S.LampPanel == LampPanelPlace.Bottom)
             {
-                lampStrip = new LampPanel(S.LampMode) { IsHitTestVisible = true };
-                lampStrip.MouseLeftButtonDown += (s, e) =>   // the strip moves the launcher, like the buttons row does
-                {
-                    if (e.ButtonState != MouseButtonState.Pressed) return;
-                    try { DragMove(); } catch (InvalidOperationException) { }
-                };
+                lampStrip = new LampPanel(S.LampMode);
+                HookLampStrip(lampStrip, true);   // the strip moves the launcher, like the buttons row does; right-click: activity
                 DockPanel.SetDock(lampStrip, S.LampPanel == LampPanelPlace.Top ? Dock.Top : Dock.Bottom);
             }
             if (lampStrip != null && S.LampPanel == LampPanelPlace.Top) main.Children.Add(lampStrip);   // first: the top edge

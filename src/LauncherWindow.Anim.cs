@@ -223,6 +223,47 @@ namespace ReadyLauncher
         }
 
         /// <summary>
+        /// Test copies only: draw the lamp strip's window (with its monitor) on its own, never the screen, partway through
+        /// closing (at 25% and 60%) and opening (at 20%, 50% and 80%), as transparent PNGs in a folder.
+        /// </summary>
+        void TestLampAnimFrames(string folder)
+        {
+            System.IO.Directory.CreateDirectory(folder);
+            Action<int, Action> after = (ms, act) =>
+            {
+                var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(Math.Max(1, ms)) };
+                timer.Tick += delegate { timer.Stop(); act(); };
+                timer.Start();
+            };
+            Action<string> frame = name =>
+            {
+                var w = lampWindow;
+                if (w == null || w.ActualWidth < 1) return;
+                var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(w.ActualWidth), (int)Math.Ceiling(w.ActualHeight), 96, 96, PixelFormats.Pbgra32);
+                rtb.Render(w);
+                var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rtb));
+                using (var fs = System.IO.File.Create(System.IO.Path.Combine(folder, name + ".png"))) enc.Save(fs);
+            };
+            int close = ElementAnimator.OverlayDuration(Anim, false, S.AnimationSpeed), open = ElementAnimator.OverlayDuration(Anim, true, S.AnimationSpeed);
+            after(5000, () =>
+            {
+                frame("0-opened");
+                HideLauncher();
+                after(close * 25 / 100, () => frame("1-close25"));
+                after(close * 60 / 100, () => frame("2-close60"));
+                after(close + 1200, () =>
+                {
+                    ShowLauncher();
+                    after(open * 20 / 100, () => frame("3-open20"));
+                    after(open * 50 / 100, () => frame("4-open50"));
+                    after(open * 80 / 100, () => frame("5-open80"));
+                    after(open + 800, () => System.IO.File.WriteAllText(System.IO.Path.Combine(folder, "done.txt"), Anim + ": close " + close + " ms, open " + open + " ms"));
+                });
+            });
+        }
+
+        /// <summary>
         /// Test copies only: picture the launcher and the windows beside it partway through closing (at 8%, 30% and 55%) and
         /// opening (at 10%, 30%, 55% and 80%), as PNGs in a folder.
         /// </summary>

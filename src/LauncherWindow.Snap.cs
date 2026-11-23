@@ -46,7 +46,7 @@ namespace ReadyLauncher
         {
             var r = new IconSnap { X = x, Y = y };
             if (S.Arrange != ArrangeMode.FreeAlign) return r;
-            double reachX = CellW * 0.25, reachY = CellH * 0.25;   // how close counts as "meant to line up"
+            double reachX = CellW * 0.125, reachY = CellH * 0.125;   // how close counts as "meant to line up": an eighth of a cell
             double maxX = MaxIconLeft();
 
             // Where the other icons are shown.

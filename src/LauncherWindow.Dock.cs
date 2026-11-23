@@ -136,11 +136,18 @@ namespace ReadyLauncher
             grid.Children.Add(layers);
             // The blinking lamp strip can fill the strip behind its icons, or run along its bottom.
             var inner = new CornerRadius(detached ? Corner - 1 : 0);
-            if (lampsBehind) grid.Children.Add(new LampPanel(S.LampMode, true) { Corners = inner });
+            // Right-clicking them changes their activity; dragging them moves the launcher, like the strip's empty space.
+            if (lampsBehind)
+            {
+                var behind = new LampPanel(S.LampMode, true) { Corners = inner };
+                HookLampStrip(behind, true);
+                grid.Children.Add(behind);
+            }
             if (lampsUnder)
             {
                 var withLamps = new DockPanel { LastChildFill = true };
                 var lamps = new LampPanel(S.LampMode) { Corners = new CornerRadius(0, 0, inner.BottomRight, inner.BottomLeft) };
+                HookLampStrip(lamps, true);
                 DockPanel.SetDock(lamps, Dock.Bottom);
                 withLamps.Children.Add(lamps);
                 withLamps.Children.Add(content);
@@ -230,7 +237,7 @@ namespace ReadyLauncher
             var button = new Border
             {
                 Width = 28, Height = 28, CornerRadius = new CornerRadius(14), Background = normal, Child = glyph, Cursor = Cursors.Hand,
-                ToolTip = (frequent ? "Showing your most used apps" : "Showing your most recently installed apps") + " - click to change",
+                ToolTip = (frequent ? "Showing your most used apps" : "Showing your most recently installed apps") + " - click to change, right-click to see the apps you've hidden",
                 VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
                 Margin = horizontal ? new Thickness(0, 0, 12, 0) : new Thickness(0, 0, 0, 10)
             };
@@ -240,21 +247,173 @@ namespace ReadyLauncher
             button.MouseLeftButtonUp += (s, e) =>
             {
                 e.Handled = true;
-                var menu = new ContextMenu { PlacementTarget = button };
-                switch (S.DockPos)
-                {
-                    case DockPosition.Bottom: menu.Placement = PlacementMode.Top; break;
-                    case DockPosition.Top: menu.Placement = PlacementMode.Bottom; break;
-                    case DockPosition.Left: menu.Placement = PlacementMode.Right; break;
-                    default: menu.Placement = PlacementMode.Left; break;
-                }
+                var menu = DockButtonMenu(button);
                 menu.Items.Add(Item("Most used apps", () => SetDockSource(DockSource.Frequent), S.Dock == DockSource.Frequent, ""));
                 menu.Items.Add(Item("Recently installed apps", () => SetDockSource(DockSource.RecentlyInstalled), S.Dock == DockSource.RecentlyInstalled, ""));
                 menu.Items.Add(new Separator());
                 menu.Items.Add(Item("Quick launch settings...", () => app.OpenSettings(2), false, ""));
                 menu.IsOpen = true;
             };
+            // Right-click: the apps hidden from the strip, to bring one back.
+            button.MouseRightButtonDown += (s, e) => { e.Handled = true; };
+            button.MouseRightButtonUp += (s, e) =>
+            {
+                e.Handled = true;
+                var menu = DockButtonMenu(button);
+                foreach (var i in HiddenDockMenuItems()) menu.Items.Add(SettingsTheme.MenuEntry(i));
+                menu.IsOpen = true;
+            };
+            dockButton = button;
             return button;
+        }
+
+        Border dockButton;   // the strip's round button (for the test copies' checks)
+
+        /// <summary>A menu for the round button, opening toward the launcher.</summary>
+        ContextMenu DockButtonMenu(FrameworkElement button)
+        {
+            var menu = SettingsTheme.ThemeMenu(new ContextMenu { PlacementTarget = button });
+            switch (S.DockPos)
+            {
+                case DockPosition.Bottom: menu.Placement = PlacementMode.Top; break;
+                case DockPosition.Top: menu.Placement = PlacementMode.Bottom; break;
+                case DockPosition.Left: menu.Placement = PlacementMode.Right; break;
+                default: menu.Placement = PlacementMode.Left; break;
+            }
+            return menu;
+        }
+
+        /// <summary>The round button's right-click list: every app hidden from the strip; clicking one brings it back.</summary>
+        List<object> HiddenDockMenuItems()
+        {
+            var items = new List<object>();
+            var hidden = S.DockHidden.OrderBy(h => DockAppName(h), StringComparer.CurrentCultureIgnoreCase).ToList();
+            if (hidden.Count == 0)
+            {
+                items.Add(new TextBlock { Text = "No hidden apps", Opacity = 0.7, IsHitTestVisible = false, Margin = new Thickness(0, 2, 0, 2) });
+                items.Add(new TextBlock { Text = "Tip: right-click an app in quick launch to hide it", FontSize = 11, Opacity = 0.6, IsHitTestVisible = false });
+                return items;
+            }
+            items.Add(new TextBlock { Text = "Hidden apps: click one to show it again", FontSize = 11, Opacity = 0.6, IsHitTestVisible = false, Margin = new Thickness(0, 2, 0, 4) });
+            foreach (var h in hidden)
+            {
+                var one = h;
+                string name = DockAppName(h), lists = DockListNames(h);
+                var mi = Item(name + " (removed from " + lists + ")", () => RestoreToDock(one), false, null);
+                mi.ToolTip = "Show " + name + " in " + lists + " again";
+                var icon = string.IsNullOrEmpty(h.Path) ? null : IconCache.Get(h.Path, 32);
+                if (icon != null) mi.Icon = new Image { Source = icon, Width = 16, Height = 16 };
+                items.Add(mi);
+            }
+            if (hidden.Count > 1)
+            {
+                items.Add(new Separator());
+                items.Add(Item("Show all " + hidden.Count + " again", () => RestoreToDock(null), false, ""));
+            }
+            return items;
+        }
+
+        /// <summary>A strip list's short name: Most Used or Recently Installed.</summary>
+        static string DockListName(DockSource list)
+        {
+            return list == DockSource.Frequent ? "Most Used" : list == DockSource.RecentlyInstalled ? "Recently Installed" : "quick launch";
+        }
+
+        /// <summary>The lists an app was removed from: "Most Used", "Recently Installed" or "Most Used & Recently Installed".</summary>
+        static string DockListNames(HiddenDockApp h)
+        {
+            return string.Join(" & ", h.HiddenLists().Select(DockListName));
+        }
+
+        static string DockAppName(HiddenDockApp h)
+        {
+            if (!string.IsNullOrEmpty(h.Name)) return h.Name;
+            try { return System.IO.Path.GetFileNameWithoutExtension(h.Path); } catch (Exception) { return h.Path; }
+        }
+
+        /// <summary>
+        /// Takes an app off the list the strip is showing (it still shows in the other list); the next app in line takes
+        /// its place.
+        /// </summary>
+        void HideFromDock(LauncherItem it)
+        {
+            if (it == null || S.Dock == DockSource.Hidden) return;
+            var known = S.DockHidden.FirstOrDefault(h => h.Matches(it));
+            if (known == null) S.DockHidden.Add(known = new HiddenDockApp { Name = it.Name ?? "", Path = it.Path ?? "" });
+            known.SetHidden(S.Dock, true);
+            app.Save();
+            if (dockItems != null)
+            {
+                var tile = dockItems.Children.OfType<TileView>().FirstOrDefault(v => v.Item == it);
+                if (tile != null) dockItems.Children.Remove(tile);   // right away, before the list is read again
+            }
+            RefreshDock();
+        }
+
+        /// <summary>Puts a hidden app back in every list it was removed from (null: all of them).</summary>
+        void RestoreToDock(HiddenDockApp h)
+        {
+            if (h == null) S.DockHidden.Clear();
+            else S.DockHidden.Remove(h);
+            app.Save();
+            RefreshDock();
+        }
+
+        /// <summary>
+        /// Test copies only: steps (separated by ;) two seconds apart, written to dock-test.txt. list: the apps on the
+        /// strip; menu:n: app n's right-click menu; remove:n: its "Remove from quick launch"; hidden: the round button's
+        /// right-click list; restore:name and restoreall: click those in it; tip: the round button's tooltip;
+        /// source:Frequent or source:RecentlyInstalled: switch the strip's list.
+        /// </summary>
+        void TestDock(string script)
+        {
+            var steps = new Queue<string>(script.Split(';'));
+            string log = System.IO.Path.Combine(LauncherData.DataFolder, "dock-test.txt");
+            Action<string> write = line => { try { System.IO.File.AppendAllText(log, line + "\r\n"); } catch (Exception) { } };
+            Func<IEnumerable<object>, string> describe = list => string.Join(" | ", list.Select(o =>
+                o is Separator ? "---" : o is MenuItem ? (string)((MenuItem)o).Header + (((MenuItem)o).Icon is Image ? " [icon]" : "")
+                : o is TextBlock ? "(" + ((TextBlock)o).Text + ")" : "?"));
+            Func<IEnumerable<object>, string, MenuItem> find = (list, header) =>
+                list.OfType<MenuItem>().FirstOrDefault(m => string.Equals((string)m.Header, header, StringComparison.OrdinalIgnoreCase));
+            Func<int, TileView> tile = n => dockItems == null ? null : dockItems.Children.OfType<TileView>().ElementAtOrDefault(n);
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            timer.Tick += delegate
+            {
+                if (steps.Count == 0) { timer.Stop(); return; }
+                string step = steps.Dequeue();
+                string arg = step.Contains(":") ? step.Substring(step.IndexOf(':') + 1) : "";
+                try
+                {
+                    if (step == "list")
+                        write("strip: " + (dockItems == null ? "(none)" : string.Join(", ", dockItems.Children.OfType<FrameworkElement>()
+                            .Select(c => c is TileView ? ((TileView)c).Item.Name : c is TextBlock ? "(" + ((TextBlock)c).Text + ")" : "?"))));
+                    else if (step.StartsWith("menu:"))
+                        write("menu of " + tile(int.Parse(arg)).Item.Name + ": " + describe(ItemMenuItems(tile(int.Parse(arg)), DragOrigin.Dock)));
+                    else if (step.StartsWith("remove:"))
+                    {
+                        var t = tile(int.Parse(arg));
+                        var mi = find(ItemMenuItems(t, DragOrigin.Dock), "Remove from quick launch");
+                        write("remove " + t.Item.Name + ": " + (mi == null ? "NO SUCH ITEM" : "clicked"));
+                        if (mi != null) mi.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                    }
+                    else if (step == "hidden") write("hidden list: " + describe(HiddenDockMenuItems()));
+                    else if (step.StartsWith("restore:") || step == "restoreall")
+                    {
+                        var list = HiddenDockMenuItems();
+                        var mi = step == "restoreall" ? list.OfType<MenuItem>().LastOrDefault() : find(list, arg);
+                        write(step + ": " + (mi == null ? "NO SUCH ITEM" : "clicked " + mi.Header));
+                        if (mi != null) mi.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                    }
+                    else if (step == "tip") write("round button tooltip: " + (dockButton == null ? "(none)" : dockButton.ToolTip));
+                    else if (step.StartsWith("source:"))
+                    {
+                        SetDockSource((DockSource)Enum.Parse(typeof(DockSource), arg));
+                        write("strip now shows " + DockListName(S.Dock));
+                    }
+                }
+                catch (Exception ex) { write(step + ": FAILED " + ex.Message); }
+            };
+            timer.Start();
         }
 
         void SetDockSource(DockSource src)
@@ -272,17 +431,20 @@ namespace ReadyLauncher
             var source = S.Dock;
             int count = Math.Max(1, Math.Min(30, S.DockCount));
             var usage = Data.Usage.ToList();
+            var hidden = S.DockHidden.Where(h => h.HiddenFrom(source)).ToList();   // only those removed from this list
+            int ask = count + hidden.Count;   // enough to fill the strip once the hidden apps are left out
             // Test copies only: a fixed list of apps, so screenshots don't show this PC's own usage.
             string demo = Program.TestMode ? Environment.GetEnvironmentVariable("READYLAUNCHER_DEMO_DOCK") : null;
             Task.Factory.StartNew(() => !string.IsNullOrEmpty(demo)
-                    ? demo.Split('|').Take(count).Select(p => ShellHelper.ItemForPath(p)).ToList()
+                    ? demo.Split('|').Take(ask).Select(p => ShellHelper.ItemForPath(p)).ToList()
                     : source == DockSource.Frequent
-                    ? ShellHelper.MostFrequent(count, usage)
-                    : ShellHelper.RecentlyInstalled(count))
+                    ? ShellHelper.MostFrequent(ask, usage)
+                    : ShellHelper.RecentlyInstalled(ask))
                 .ContinueWith(t =>
                 {
+                    var all = t.IsFaulted ? new List<LauncherItem>() : t.Result;
                     if (req != dockRequest || drag != null) return;
-                    FillDock(t.IsFaulted ? new List<LauncherItem>() : t.Result);
+                    FillDock(all.Where(i => !hidden.Any(h => h.Matches(i))).Take(count).ToList());
                 }, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
@@ -294,7 +456,8 @@ namespace ReadyLauncher
             {
                 dockItems.Children.Add(new TextBlock
                 {
-                    Text = S.Dock == DockSource.Frequent ? "Apps you use often will appear here" : "No recently installed apps found",
+                    Text = S.DockHidden.Any(h => h.HiddenFrom(S.Dock)) ? "Every app here is hidden: right-click the round button to bring one back"
+                        : S.Dock == DockSource.Frequent ? "Apps you use often will appear here" : "No recently installed apps found",
                     Foreground = dockFg, Opacity = 0.7, Margin = new Thickness(8, 10, 8, 10), TextWrapping = TextWrapping.Wrap
                 });
                 return;

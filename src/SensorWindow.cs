@@ -433,7 +433,7 @@ namespace ReadyLauncher
         void ShowMenu(FrameworkElement chip, string id)
         {
             var r = last == null ? null : last.FirstOrDefault(x => x.Info.Id == id);
-            var menu = new ContextMenu { PlacementTarget = chip };
+            var menu = SettingsTheme.ThemeMenu(new ContextMenu { PlacementTarget = chip });
             if (gears.ContainsValue(chip)) menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;   // from the gear: just below it
             if (tiles && History.ContainsKey(id))   // a reading with no number (an IP address, an app name) has no graph
             {

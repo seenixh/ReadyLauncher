@@ -12,7 +12,9 @@ namespace ReadyLauncher
     public enum DockSource { Frequent, RecentlyInstalled, Hidden }
     public enum DockPosition { Bottom, Top, Left, Right }
     public enum LampPanelPlace { Off, Top, Bottom, AboveLauncher, BelowLauncher, UnderStrip, StripBackground }   // the blinking lamp strip: saved by name; Settings lists them in this order
-    public enum LampActivity { Idle, Computing, Alert }
+    public enum LampActivity { Idle, Computing, Alert, Random }   // Random: switches between the other three now and then
+    public enum LampMonitorPlace { None, Left, Right }   // a computer cabinet at one end of a lamp strip outside the launcher
+    public enum LampTextEffect { None, Scroll, Flash }   // words spelled out in lamps on the strip
     public enum DockAlignment { Start, Center, End }
     public enum VolumePlacement { Off, InsideLeft, InsideRight, OutsideLeft, OutsideRight }
     public enum IconSizeMode { ExtraSmall, Small, Medium, Large, Tiny }   // Tiny was added later, so it comes last here
@@ -146,6 +148,7 @@ namespace ReadyLauncher
         public bool AnimateNotes, AnimateSensors, AnimateDock, AnimateVolume;
         public LampPanelPlace LampPanel;
         public LampActivity LampMode = LampActivity.Computing;
+        public LampMonitorPlace LampMonitor;
     }
 
     /// <summary>A theme you saved from your own look (Settings > Appearance > Save as theme).</summary>
@@ -153,6 +156,53 @@ namespace ReadyLauncher
     {
         public string Id = "", Name = "";
         public SavedLook Look;
+    }
+
+    /// <summary>
+    /// An app taken off the quick launch strip (right-click it there). It's matched by its path or its name, because
+    /// the strip lists each app once by name and the same app can come from a different shortcut.
+    /// </summary>
+    /// <summary>A reminder on the lamp strip: from <see cref="At"/> on, the strip flashes <see cref="Text"/> until it's dismissed.</summary>
+    public class LampReminder
+    {
+        [XmlAttribute] public DateTime At;
+        [XmlAttribute] public string Text = "";
+    }
+
+    public class HiddenDockApp
+    {
+        [XmlAttribute] public string Name = "";
+        [XmlAttribute] public string Path = "";
+        /// <summary>
+        /// The strip lists it's hidden from: "Frequent", "RecentlyInstalled" or both, separated by a comma. It still shows
+        /// in a list it wasn't removed from.
+        /// </summary>
+        [XmlAttribute, System.ComponentModel.DefaultValue("")] public string From = "";
+
+        static readonly DockSource[] Lists = { DockSource.Frequent, DockSource.RecentlyInstalled };
+
+        public List<DockSource> HiddenLists()
+        {
+            var named = (From ?? "").Split(',').Select(s => s.Trim()).ToList();
+            return Lists.Where(l => named.Contains(l.ToString())).ToList();
+        }
+
+        public bool HiddenFrom(DockSource list) { return HiddenLists().Contains(list); }
+
+        public void SetHidden(DockSource list, bool hidden)
+        {
+            var now = HiddenLists();
+            if (hidden && !now.Contains(list)) now.Add(list);
+            if (!hidden) now.Remove(list);
+            From = string.Join(",", Lists.Where(now.Contains).Select(l => l.ToString()));
+        }
+
+        public bool Matches(LauncherItem it)
+        {
+            if (it == null) return false;
+            return (!string.IsNullOrEmpty(Path) && string.Equals(Path, it.Path, StringComparison.OrdinalIgnoreCase))
+                || (!string.IsNullOrEmpty(Name) && string.Equals(Name, it.Name, StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     public class UsageEntry
@@ -203,6 +253,18 @@ namespace ReadyLauncher
         public string AllPartsColor = "";
         public LampPanelPlace LampPanel = LampPanelPlace.Off;   // a strip of blinking computer lamps along the top or bottom
         public LampActivity LampMode = LampActivity.Computing;
+        public LampMonitorPlace LampMonitor = LampMonitorPlace.None;   // the WOPR cabinet at one end of a strip above or below the launcher
+        public LampTextEffect LampTextMode = LampTextEffect.None;      // spell LampText on the strip, scrolling or flashing
+        public string LampText = "";
+        public bool LampTextSides;                // keep the lamps blinking on either side of the text
+        [XmlArrayItem("Reminder")] public List<LampReminder> Reminders = new List<LampReminder>();   // flashed on the lamp strip from their time on, until dismissed
+        // The single reminder of version 1.75: read from older settings, moved into Reminders, and no longer written.
+        public bool ReminderOn;
+        public DateTime ReminderAt = new DateTime(2000, 1, 1);
+        public string ReminderText = "";
+        public bool ShouldSerializeReminderOn() { return false; }
+        public bool ShouldSerializeReminderAt() { return false; }
+        public bool ShouldSerializeReminderText() { return false; }
 
         // Quick launch strip
         public int DockCount = 12;
@@ -215,6 +277,8 @@ namespace ReadyLauncher
         public int DockTransparency;              // percent, whole strip background
         public bool DockDetached;                 // strip floats in its own window beside the launcher
         public int DockGap = 8;                   // pixels between the launcher and a detached strip
+        /// <summary>Apps hidden from the strip; right-click the strip's round button to see them and bring one back.</summary>
+        [XmlArrayItem("App")] public List<HiddenDockApp> DockHidden = new List<HiddenDockApp>();
 
         // Volume control
         public int VolumeGap = 4;                 // pixels between the launcher and an outside volume control
@@ -542,7 +606,17 @@ namespace ReadyLauncher
             if (Settings.Theme == null) Settings.Theme = "";
             if (Settings.MyThemes == null) Settings.MyThemes = new List<UserTheme>();
             if (SeenApps == null) SeenApps = new List<string>();
+            if (Settings.DockHidden == null) Settings.DockHidden = new List<HiddenDockApp>();
+            Settings.DockHidden.RemoveAll(h => h == null || (string.IsNullOrEmpty(h.Name) && string.IsNullOrEmpty(h.Path)));
+            foreach (var h in Settings.DockHidden)   // no list recorded (version 1.67 hid an app from both)
+                if (h.HiddenLists().Count == 0) { h.SetHidden(DockSource.Frequent, true); h.SetHidden(DockSource.RecentlyInstalled, true); }
             if (Settings.Sensors == null) Settings.Sensors = new List<string>();
+            if (Settings.Reminders == null) Settings.Reminders = new List<LampReminder>();
+            Settings.Reminders.RemoveAll(r => r == null || string.IsNullOrWhiteSpace(r.Text));
+            if (Settings.ReminderOn && !string.IsNullOrWhiteSpace(Settings.ReminderText))   // the single reminder of 1.75
+                Settings.Reminders.Add(new LampReminder { At = Settings.ReminderAt, Text = Settings.ReminderText.Trim() });
+            Settings.ReminderOn = false;
+            Settings.ReminderText = "";
             if (Settings.KnownSensors == null) Settings.KnownSensors = new List<KnownSensor>();
             if (Settings.SensorNoGraph == null) Settings.SensorNoGraph = new List<string>();
             if (Settings.SensorAlerts == null) Settings.SensorAlerts = new List<SensorAlert>();

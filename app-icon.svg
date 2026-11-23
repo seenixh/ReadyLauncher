@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Ready Launcher: Launch Grid, dark and amber in a gold frame</title>
+  <defs>
+    <!-- polished gold: light and dark bands, as metal catches the light -->
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8A5A00"/>
+      <stop offset="0.10" stop-color="#D89A06"/>
+      <stop offset="0.20" stop-color="#FFD94C"/>
+      <stop offset="0.28" stop-color="#F0B414"/>
+      <stop offset="0.40" stop-color="#B07A02"/>
+      <stop offset="0.53" stop-color="#EDB20C"/>
+      <stop offset="0.61" stop-color="#FFE47A"/>
+      <stop offset="0.70" stop-color="#DCA006"/>
+      <stop offset="0.85" stop-color="#93620A"/>
+      <stop offset="1" stop-color="#E2A504"/>
+    </linearGradient>
+    <!-- the frame's roundness: lit from above, in shade below -->
+    <linearGradient id="goldShade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="0.35" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.7" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.22"/>
+    </linearGradient>
+    <!-- a band of light sweeping across the gold -->
+    <linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#FFF6D2" stop-opacity="0.62"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3A3F44"/>
+      <stop offset="1" stop-color="#16181A"/>
+    </linearGradient>
+    <linearGradient id="slot" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5E646A"/>
+      <stop offset="1" stop-color="#3C4146"/>
+    </linearGradient>
+    <!-- the arrow in polished gold, the same bands as the frame running across the whole arrow -->
+    <linearGradient id="arrow" gradientUnits="userSpaceOnUse" x1="284" y1="106" x2="406" y2="228">
+      <stop offset="0" stop-color="#FFF0A8"/>
+      <stop offset="0.16" stop-color="#FFD94C"/>
+      <stop offset="0.32" stop-color="#E2A504"/>
+      <stop offset="0.46" stop-color="#FFE47A"/>
+      <stop offset="0.58" stop-color="#F0B414"/>
+      <stop offset="0.78" stop-color="#A87200"/>
+      <stop offset="1" stop-color="#D89A06"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FFC233" stop-opacity="0.42"/>
+      <stop offset="0.5" stop-color="#E2A504" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#E2A504" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="lift" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="7" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+    <!-- the frame alone: the rounded square with the panel cut out -->
+    <clipPath id="ring">
+      <path clip-rule="evenodd" d="M124 16 H388 A108 108 0 0 1 496 124 V388 A108 108 0 0 1 388 496 H124 A108 108 0 0 1 16 388 V124 A108 108 0 0 1 124 16 Z
+                                    M128 44 H384 A84 84 0 0 1 468 128 V384 A84 84 0 0 1 384 468 H128 A84 84 0 0 1 44 384 V128 A84 84 0 0 1 128 44 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- the gold frame -->
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#gold)"/>
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#goldShade)"/>
+  <g clip-path="url(#ring)">
+    <rect x="-60" y="96" width="560" height="44" fill="url(#sweep)" transform="rotate(-40 256 256)"/>
+    <rect x="-60" y="380" width="560" height="22" fill="url(#sweep)" opacity="0.55" transform="rotate(-40 256 256)"/>
+  </g>
+  <rect x="17.5" y="17.5" width="477" height="477" rx="106.5" fill="none" stroke="#5E3E00" stroke-opacity="0.55" stroke-width="3"/>
+  <rect x="21" y="21" width="470" height="470" rx="103" fill="none" stroke="#FFE69A" stroke-opacity="0.45" stroke-width="2"/>
+  <!-- where the gold meets the panel: a bright lip, then a dark seam -->
+  <rect x="41.5" y="41.5" width="429" height="429" rx="86.5" fill="none" stroke="#FFE07A" stroke-opacity="0.7" stroke-width="3"/>
+  <rect x="44" y="44" width="424" height="424" rx="84" fill="#2A1C00"/>
+
+  <!-- the panel, with the waiting apps and the one taking off -->
+  <rect x="46" y="46" width="420" height="420" rx="82" fill="url(#tile)"/>
+  <rect x="47.5" y="47.5" width="417" height="417" rx="80.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.10" stroke-width="3"/>
+  <g transform="translate(256 256) scale(0.875) translate(-256 -256)">
+    <g fill="url(#slot)" filter="url(#lift)">
+      <rect x="108" y="108" width="128" height="128" rx="34"/>
+      <rect x="108" y="276" width="128" height="128" rx="34"/>
+      <rect x="276" y="276" width="128" height="128" rx="34"/>
+    </g>
+    <circle cx="340" cy="172" r="118" fill="url(#glow)"/>
+    <!-- the arrow in gold: a darker gold edge, the polished gold, and a bright edge where the light catches it -->
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <g stroke="#7A5100" stroke-opacity="0.85" stroke-width="42.5">
+        <path d="M300 212 L390 122"/>
+        <path d="M316 122 H390 V196"/>
+      </g>
+      <g stroke="url(#arrow)" stroke-width="38">
+        <path d="M300 212 L390 122"/>
+        <path d="M316 122 H390 V196"/>
+      </g>
+      <g stroke="#FFF7D6" stroke-opacity="0.55" stroke-width="6" transform="translate(-6 -6)">
+        <path d="M306 206 L384 128"/>
+        <path d="M322 128 H384"/>
+      </g>
+    </g>
+  </g>
+</svg>

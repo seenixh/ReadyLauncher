@@ -10,8 +10,8 @@ using WF = System.Windows.Forms;
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]
 [assembly: System.Reflection.AssemblyTitle("Ready Launcher")]
 [assembly: System.Reflection.AssemblyProduct("Ready Launcher")]
-[assembly: System.Reflection.AssemblyVersion("1.66.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.66.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.86.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.86.0.0")]
 
 namespace ReadyLauncher
 {
@@ -159,6 +159,9 @@ namespace ReadyLauncher
             Themes.EnsurePictures(Data.Settings);   // a theme's picture that went missing is drawn again
             Launcher = new LauncherWindow(this);
             CreateTray();
+            // A sign-out or restart that's canceled leaves the launcher running; one that goes ahead closes it, saved.
+            if (!SessionEndGuard.Install(this, ExitApp))
+                Dispatcher.BeginInvoke(new Action(() => SessionEndGuard.Install(this, ExitApp)), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             CreateHotkeyWindow();
             if (!Program.TestMode) RegisterStartupHotkey();
             MoveOldStartupEntry();
@@ -195,6 +198,7 @@ namespace ReadyLauncher
                             t.Tick += delegate { t.Stop(); Launcher.SaveSnapshots(folder, 2); };
                             t.Start();
                         }
+                        else if (action.StartsWith("settingsshot:")) SettingsPicture(action.Substring(13));
                         else if (action.StartsWith("export:")) ExportTo(action.Substring(7));
                         else if (action.StartsWith("import:")) ImportBackup(Backup.Read(action.Substring(7)));
                         else Launcher.RunTestAction(action);
@@ -319,6 +323,46 @@ namespace ReadyLauncher
 
         // ---------- settings ----------
 
+        /// <summary>
+        /// Test copies only: "settingsshot:&lt;tab&gt;:&lt;file&gt;" draws Settings off screen (never shown where you can see
+        /// it, and never focused), on that tab ("reminder": at the reminder), and saves it as a picture.
+        /// </summary>
+        void SettingsPicture(string arg)
+        {
+            int colon = arg.IndexOf(':');
+            string tab = arg.Substring(0, colon), file = arg.Substring(colon + 1);
+            var wait = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            wait.Tick += delegate
+            {
+                wait.Stop();
+                var w = new SettingsWindow(this) { ShowActivated = false, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.Manual };
+                w.Left = -30000;
+                w.Top = -30000;
+                if (tab == "reminder" || tab == "remindertest") { w.ShowTab(1); w.ShowReminder(); } else w.ShowTab(int.Parse(tab));
+                w.Show();
+                var later = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+                later.Tick += delegate
+                {
+                    later.Stop();
+                    if (tab == "remindertest")
+                    {
+                        System.IO.File.WriteAllText(file + ".txt", w.TestReminders());
+                        w.UpdateLayout();
+                    }
+                    var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(w);
+                    var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap((int)(w.ActualWidth * dpi.DpiScaleX), (int)(w.ActualHeight * dpi.DpiScaleY),
+                        96 * dpi.DpiScaleX, 96 * dpi.DpiScaleY, System.Windows.Media.PixelFormats.Pbgra32);
+                    rtb.Render(w);
+                    var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                    enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rtb));
+                    using (var fs = System.IO.File.Create(file)) enc.Save(fs);
+                    w.Close();
+                };
+                later.Start();
+            };
+            wait.Start();
+        }
+
         public void OpenSettings(int tab = 0)
         {
             if (settings != null) { settings.ShowTab(tab); settings.Activate(); return; }
@@ -332,6 +376,13 @@ namespace ReadyLauncher
             settings.Closed += delegate { settings = null; ModalOpen = false; };
             settings.Show();
             settings.Activate();
+        }
+
+        /// <summary>Settings at the lamp strip's reminder.</summary>
+        public void OpenReminderSettings()
+        {
+            OpenSettings(1);
+            if (settings != null) settings.ShowReminder();
         }
 
         /// <summary>Settings closes when the launcher closes (changes not applied yet are dropped, as with Cancel).</summary>

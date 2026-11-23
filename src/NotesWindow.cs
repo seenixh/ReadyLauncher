@@ -229,7 +229,7 @@ namespace ReadyLauncher
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 Foreground = fg, CaretBrush = fg, BorderThickness = new Thickness(0), Padding = new Thickness(6, 6, 6, 6),
                 FontSize = fontSize, SelectionBrush = new SolidColorBrush(Color.FromRgb(0x33, 0x99, 0xFF)),
-                ContextMenu = new ContextMenu(), Background = Brushes.Transparent, Visibility = Visibility.Collapsed,
+                ContextMenu = SettingsTheme.ThemeMenu(new ContextMenu()), Background = Brushes.Transparent, Visibility = Visibility.Collapsed,
                 IsInactiveSelectionHighlightEnabled = true   // a found word stays highlighted while typing in the find box
             };
             e.SpellCheck.IsEnabled = true;
@@ -584,7 +584,7 @@ namespace ReadyLauncher
 
         void ShowTabMenu(int index, FrameworkElement anchor)
         {
-            var menu = new ContextMenu { PlacementTarget = anchor, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+            var menu = SettingsTheme.ThemeMenu(new ContextMenu { PlacementTarget = anchor, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom });
             menu.Items.Add(MenuAction("Rename", () => StartRename(index)));
             menu.Items.Add(MenuAction("Move left", () => MoveTab(index, -1), index > 0));
             menu.Items.Add(MenuAction("Move right", () => MoveTab(index, 1), index < names.Count - 1));

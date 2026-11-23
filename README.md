@@ -6,6 +6,12 @@ C# compiler and WPF that ship with Windows (.NET Framework 4.8).
 **Download:** get `ReadyLauncher.exe` from the [latest release](https://github.com/seenixh/ReadyLauncher/releases/latest)
 and double-click it, or build it yourself as described below.
 
+### Demo video
+
+[![Watch the Ready Launcher demo video on YouTube](docs/demo-video.png)](https://youtu.be/5XvHjNY6-WQ)
+
+### The launcher
+
 ![Ready Launcher: the launcher window with icons, a folder, key-combo icons, web links, text labels and divider lines, a quick-launch strip, a notes window and a volume control](docs/showcase.png)
 
 ### Sensor tiles
@@ -52,6 +58,7 @@ quick launch strip's icons.
 | Line icons up as you place them | Choose *Free placement, align to nearby icons*. A dragged icon lines up with the nearest icon beside it (same row) and above or below it (same column), and sits exactly one icon's spacing from a neighbor it's dropped next to. Dashed guide lines show what it lines up with while you drag. Drop it away from other icons and it stays exactly where you let go. It works for one icon, several selected icons, and icons dragged in from Explorer. |
 | Change an icon's picture | Right-click it → *Change icon* → a Windows icon, any picture, or back to the original. |
 | Run as admin, open file location, rename, remove | Right-click an icon. Removing only removes the shortcut from the launcher. |
+| Hide an app from the quick launch strip | Right-click it on the strip → *Remove from quick launch*; it's removed only from the list the strip is showing (*Most used* or *Recently installed*), and the next app in that list takes its place. Right-click the strip's round button (the star) to see every app you've hidden, each with the list it was removed from in parentheses, and click one to bring it back (or *Show all again*). |
 | Make an icon that presses keys | **+** → *Add a keyboard shortcut*, then press the combination (tick **Win** for Windows-key combos such as Win + D). Clicking the icon sends those keys to the app you were using. |
 | Add a divider line | **+** (or right-click an empty spot) → *Add a horizontal line* / *Add a vertical line*. Choose direction, length, thickness and color; the line updates live while you choose. |
 | Add text | **+** (or right-click an empty spot) → *Add text*. New text starts at the top center. Choose the font, size, color, bold, italic, underline, a drop shadow (small, medium, large) and an outline (thin, thick), each in any color. |
@@ -61,7 +68,7 @@ quick launch strip's icons.
 | Color the buttons, volume control, icon names or notes tabs | Settings → Appearance → *Colors of the launcher's parts*: one color each, or the same color for all four. |
 | Dress everything up at once | Settings → Appearance → *Theme*: a background picture and matching colors for every window and button. *Christmas Lights* is a snowy night with a house covered in big colored bulbs. *None* puts your own look back. |
 | Save your look as a theme, or share one | Settings → Appearance → *Save as theme...* keeps your pictures, colors, see-through settings, animation and lamp strip under a name. *Export...* saves the chosen theme to a `.rltheme` file; *Import...* adds one someone shared. |
-| Add blinking computer lamps | Settings → Appearance → *Lamp strip*: inside the launcher (top or bottom), floating above or below it, along the bottom of the quick launch strip, or behind its icons; *Lamp activity* sets idle, computing or alert. |
+| Add blinking computer lamps | Settings → Appearance → *Lamp strip*: inside the launcher (top or bottom), floating above or below it, along the bottom of the quick launch strip, or behind its icons; *Lamp activity* sets idle, computing, alert, or *Randomize* (switches between them on its own every 20 to 60 seconds). Right-click the strip to change its activity right there. *Monitor* stands a WOPR computer cabinet, with a few lamps blinking in its window, at the left or right end of a strip above or below the launcher. *Lamp text* spells your own words in lamps, scrolling across or flashing. *Reminders* flash messages from dates and times you set until you right-click the strip and dismiss them; add and delete them in a list. |
 | Take notes | Click the notes button at the top of the launcher and pick left or right. The notes window opens and closes with the launcher and saves as you type. Its save button writes all the notes (every tab) to a text file. |
 | Notes tabs | Click **+** for a new tab (type its name, Enter). Double-click a tab to rename it; right-click it to move it left or right, give it its own **color** (shown as a dot on the tab), or delete it. Right after deleting, **Undo** under the tabs brings it back with its notes (for about 12 seconds). |
 | Find in notes | **Ctrl+F** opens a find box above the text: it searches every tab as you type, jumping to other tabs as needed. Enter / F3 for the next match, Shift+Enter / Shift+F3 for the previous one, Esc to close. |
@@ -91,9 +98,9 @@ what it measures). It has six tabs:
   medium or large), *Close the launcher after choosing a
   volume* (after clicking a volume button or moving the slider) and
   how far an outside volume control sits from the window, open icons with a double-click, hide-after-launch, hide-when-clicking-away,
-  start with Windows, the **Settings theme** (a square button in each theme's color: follow system,
+  start with Windows (and a sign-out or restart that's canceled leaves the launcher open), the **Settings theme** (a square button in each theme's color: follow system,
   light, light grey, grey, dark grey, dark or Christmas; you see each one right away; the text / line, keyboard
-  shortcut, add-all-apps and warning levels windows use it too, and checkboxes are a shade darker than their
+  shortcut, add-all-apps and warning levels windows and every right-click menu use it too, and checkboxes are a shade darker than their
   panel rather than white; the notes' checklist boxes take the notes' own colors), **Backup**: *Export* / *Import*
   and automatic backups (see below), and **Updates**: the version you
   have, *Check for updates*, and a link to the project on GitHub. When GitHub has a newer release,
@@ -122,7 +129,18 @@ what it measures). It has six tabs:
   along the bottom), sit outside it right against its top or bottom
   edge (a floating quick launch strip or the sensor bar moves out to make room), run along the bottom of the
   quick launch strip, or fill the strip behind its icons. *Lamp activity* sets how busy it looks: idle, computing, or
-  alert (busier, with a band of light sweeping along). It only runs while the launcher is showing.
+  alert (busier, with a band of light sweeping along), or randomize, which switches between the three on its own
+  every 20 to 60 seconds. Right-click the strip to change its activity right there. It only runs while the launcher
+  is showing. **Monitor**: with the strip above or below the launcher, a computer cabinet lettered WOPR can stand at
+  its left or right end, rising above the strip (below the launcher, it stands over the launcher's bottom corner). Its
+  dark window has lamps too, spaced well apart and fewer of them lit, doing whatever the strip is doing. Right-click
+  the strip or the monitor to move it to the other end or take it away. **Lamp text**: the strip can spell out text you
+  type (*Text to show*), in lamps six high (the strip's full height), scrolling in from the right or flashing as many words as fit at once;
+  right-click the strip to switch it or change the text. Tick *Keep the lamps blinking on either side of the text* and
+  the rest of the strip goes on blinking right up to the edges of the text (and reminders) instead of going dark. **Reminders**: add as many as you like, each with a date, a
+  time and a message, and delete them from the list; from its time on, the strip flashes a reminder (instead of its
+  own text or blinking) until you right-click the strip and dismiss it, and several due at once flash in turn. If a
+  reminder's time comes while the launcher is hidden or the PC is off, it flashes the next time the launcher shows.
 - **Quick launch strip**: what it shows, how many apps (1 to 30), icon size (tiny to extra large, or the same as the launcher), position (bottom, top, left, right),
   detach it into its own floating bar and how far it sits from the window, icon alignment, divider
   line on/off, strip color, strip picture (with the same Disable / Enable) and its transparency, and the strip's overall transparency.
@@ -222,7 +240,8 @@ icon says so.
 
 ## Source layout
 
-- `src/Program.cs`: startup, single instance, tray icon, global hotkey, start-with-Windows
+- `src/Program.cs`: startup, single instance, tray icon, global hotkey, start-with-Windows; `src/SessionEndGuard.cs`:
+  staying open when a sign-out or restart is canceled (WPF on its own quits as soon as Windows asks)
 - `src/LauncherWindow*.cs`: the window (layout, drag & drop, folders, menus, quick-launch strip,
   lines and text in `.Decor.cs`, the notes window's placement in `.Notes.cs`, and in `.Snapshot.cs`
   a test-only helper that saves clean window images for documentation)

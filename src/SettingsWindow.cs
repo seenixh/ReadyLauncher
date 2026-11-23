@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -18,10 +20,22 @@ namespace ReadyLauncher
             if (index >= 0 && index < tabs.Items.Count) tabs.SelectedIndex = index;
         }
 
+        /// <summary>Scrolls the Appearance tab to the lamp strip's reminder.</summary>
+        public void ShowReminder()
+        {
+            Dispatcher.BeginInvoke(new Action(() => { if (addReminder != null) addReminder.BringIntoView(); }), System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+
         // General
         TextBox hotkeyBox, customW, customH;
         TextBlock hotkeyHint;
-        ComboBox windowSize, animation, volume, volumeButtonHeight, lampPlace, lampMode, themeBox;
+        ComboBox windowSize, animation, volume, volumeButtonHeight, lampPlace, lampMode, lampMonitor, lampTextMode, themeBox;
+        TextBox lampText, reminderText;
+        CheckBox lampTextSides;
+        ComboBox reminderMonth, reminderDay, reminderYear, reminderTime;
+        StackPanel reminderList;
+        Button addReminder;
+        List<LampReminder> reminders;   // the reminders as edited here; kept with OK or Apply
         CheckBox volumeHideSlider, volumeButtonsOn, volumeCloseAfter;
         SavedLook ownLook;   // your own look, kept while a theme is chosen
         CheckBox hideAfter, hideDeact, startup, doubleClick;
@@ -612,12 +626,137 @@ namespace ReadyLauncher
                               "Above the launcher (outside)", "Below the launcher (outside)",
                               "At the bottom of the quick launch strip", "Behind the quick launch strip's icons");
             AddRow(g, "Lamp strip", lampPlace);
-            lampMode = Combo((int)s.LampMode, "Idle (slow, few lamps lit)", "Computing", "Alert (busier, with a sweep of light)");
+            lampMode = Combo((int)s.LampMode, "Idle (slow, few lamps lit)", "Computing", "Alert (busier, with a sweep of light)", LauncherWindow.RandomLampsText);
             AddRow(g, "Lamp activity", lampMode);
-            Action lampState = () => { lampMode.IsEnabled = lampPlace.SelectedIndex != (int)LampPanelPlace.Off; };
+            lampMonitor = Combo((int)s.LampMonitor, "None", "At the left end of the strip", "At the right end of the strip");
+            lampMonitor.ToolTip = "A computer cabinet lettered WOPR, with a few lamps blinking in its window, standing at one end of the strip and rising above it. It shows when the strip is above or below the launcher (outside).";
+            AddRow(g, "Monitor", lampMonitor);
+            lampTextMode = Combo((int)s.LampTextMode, "None (the lamps just blink)", "Scroll it across the strip", "Flash it on the strip");
+            lampTextMode.ToolTip = "Spells out your text in lamps on the strip, instead of blinking.";
+            AddRow(g, "Lamp text", lampTextMode);
+            lampText = new TextBox { Text = s.LampText ?? "", Width = 250, MaxLength = 200, Padding = new Thickness(3), HorizontalAlignment = HorizontalAlignment.Left,
+                                     ToolTip = "Letters, numbers and common punctuation (small letters show as capitals)" };
+            AddRow(g, "Text to show", lampText);
+            lampTextSides = Check("Keep the lamps blinking on either side of the text", s.LampTextSides);
+            AddRow(g, "", lampTextSides);
+
+            // Reminders: each flashes on the strip from its date and time on, until it's dismissed. A new one's date
+            // starts at tomorrow, 9:00 AM.
+            var c = System.Globalization.CultureInfo.CurrentCulture;
+            reminders = s.Reminders.Select(r => new LampReminder { At = r.At, Text = r.Text }).ToList();
+            reminderList = new StackPanel();
+            AddRow(g, "Reminders", reminderList);
+            var at = DateTime.Today.AddDays(1).AddHours(9);
+            reminderMonth = Combo(at.Month - 1, c.DateTimeFormat.MonthNames.Take(12).ToArray());
+            reminderMonth.Width = 116;
+            reminderDay = Combo(at.Day - 1, Enumerable.Range(1, 31).Select(d => d.ToString(c)).ToArray());
+            reminderDay.Width = 58;
+            reminderDay.Margin = new Thickness(6, 0, 0, 0);
+            reminderYear = Combo(0, Enumerable.Range(DateTime.Today.Year, 6).Select(y => y.ToString(c)).ToArray());
+            reminderYear.SelectedItem = at.Year.ToString(c);
+            reminderYear.Width = 74;
+            reminderYear.Margin = new Thickness(6, 0, 0, 0);
+            reminderTime = Combo(at.Hour * 2, Enumerable.Range(0, 48).Select(k => DateTime.Today.AddMinutes(30 * k).ToString("t", c)).ToArray());
+            reminderTime.Width = 100;
+            var when = new StackPanel { Orientation = Orientation.Horizontal };
+            when.Children.Add(reminderMonth);
+            when.Children.Add(reminderDay);
+            when.Children.Add(reminderYear);
+            when.Children.Add(new TextBlock { Text = "at", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 8, 0) });
+            when.Children.Add(reminderTime);
+            AddRow(g, "New reminder", when);
+            reminderText = new TextBox { Width = 250, MaxLength = 200, Padding = new Thickness(3), ToolTip = "What the strip flashes when the reminder is due" };
+            addReminder = new Button { Content = "Add", Padding = new Thickness(14, 2, 14, 2), Margin = new Thickness(8, 0, 0, 0), ToolTip = "Put this reminder on the list" };
+            addReminder.Click += delegate { AddReminderFromFields(); };
+            var textLine = new StackPanel { Orientation = Orientation.Horizontal };
+            textLine.Children.Add(reminderText);
+            textLine.Children.Add(addReminder);
+            AddRow(g, "Reminder text", textLine);
+            FillReminderList();
+
+            Action lampState = () =>
+            {
+                bool strip = lampPlace.SelectedIndex != (int)LampPanelPlace.Off;
+                lampMode.IsEnabled = strip;
+                lampTextMode.IsEnabled = lampText.IsEnabled = lampTextSides.IsEnabled = strip;
+                lampMonitor.IsEnabled = lampPlace.SelectedIndex == (int)LampPanelPlace.AboveLauncher || lampPlace.SelectedIndex == (int)LampPanelPlace.BelowLauncher;
+                reminderList.IsEnabled = reminderMonth.IsEnabled = reminderDay.IsEnabled = reminderYear.IsEnabled = reminderTime.IsEnabled = strip;
+                reminderText.IsEnabled = addReminder.IsEnabled = strip;
+            };
             lampPlace.SelectionChanged += delegate { lampState(); };
             lampState();
             return g;
+        }
+
+        /// <summary>The reminders, soonest first, each with its own Delete button.</summary>
+        void FillReminderList()
+        {
+            var c = System.Globalization.CultureInfo.CurrentCulture;
+            reminderList.Children.Clear();
+            if (reminders.Count == 0)
+            {
+                reminderList.Children.Add(new TextBlock { Text = "None yet: choose a date and time below, type the text, and click Add.", Opacity = 0.7,
+                                                          Margin = new Thickness(0, 3, 0, 0), TextWrapping = TextWrapping.Wrap });
+                return;
+            }
+            foreach (var r in reminders.OrderBy(r => r.At))
+            {
+                var one = r;
+                var row = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+                var delete = new Button { Content = "Delete", Padding = new Thickness(10, 1, 10, 1), Margin = new Thickness(8, 0, 0, 0), ToolTip = "Delete this reminder" };
+                delete.Click += delegate { reminders.Remove(one); FillReminderList(); };
+                DockPanel.SetDock(delete, Dock.Right);
+                row.Children.Add(delete);
+                string when = one.At.ToString(one.At.Year == DateTime.Today.Year ? "ddd, MMM d" : "ddd, MMM d, yyyy", c) + ", " + one.At.ToString("t", c);
+                row.Children.Add(new TextBlock
+                {
+                    Text = when + (one.At <= DateTime.Now ? " (flashing now)" : "") + "  \u2014  " + one.Text,
+                    VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = one.Text
+                });
+                reminderList.Children.Add(row);
+            }
+        }
+
+        /// <summary>Puts the reminder in the fields on the list (when it has some text) and empties the text box.</summary>
+        bool AddReminderFromFields()
+        {
+            string text = reminderText.Text.Trim();
+            if (text.Length == 0) return false;
+            int y = int.Parse((string)reminderYear.SelectedItem, System.Globalization.CultureInfo.CurrentCulture), m = reminderMonth.SelectedIndex + 1;
+            int d = Math.Min(reminderDay.SelectedIndex + 1, DateTime.DaysInMonth(y, m)), half = Math.Max(0, reminderTime.SelectedIndex);
+            reminders.Add(new LampReminder { At = new DateTime(y, m, d, half / 2, half % 2 * 30, 0), Text = text });
+            reminderText.Text = "";
+            FillReminderList();
+            return true;
+        }
+
+        /// <summary>
+        /// Test copies only: adds two reminders through the fields and the Add button, deletes the first in the list
+        /// with its Delete button, leaves a third typed but not added, and keeps the changes with Apply.
+        /// </summary>
+        internal string TestReminders()
+        {
+            var log = new List<string>();
+            Func<string> list = () => string.Join(" | ", reminderList.Children.OfType<FrameworkElement>().Select(e =>
+                e is DockPanel ? ((DockPanel)e).Children.OfType<TextBlock>().First().Text : e is TextBlock ? "(" + ((TextBlock)e).Text + ")" : "?"));
+            log.Add("list at first: " + list());
+            var next = (DateTime.Today.Year + 1).ToString(System.Globalization.CultureInfo.CurrentCulture);
+            reminderYear.SelectedItem = next;
+            reminderMonth.SelectedIndex = 11; reminderDay.SelectedIndex = 24; reminderTime.SelectedIndex = 16;
+            reminderText.Text = "Christmas morning";
+            addReminder.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            reminderMonth.SelectedIndex = 1; reminderDay.SelectedIndex = 29; reminderTime.SelectedIndex = 29;
+            reminderText.Text = "Pay rent";
+            addReminder.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            log.Add("after adding two: " + list() + "; text box now: '" + reminderText.Text + "'");
+            var firstDelete = reminderList.Children.OfType<DockPanel>().First().Children.OfType<Button>().First();
+            firstDelete.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            log.Add("after deleting the first: " + list());
+            reminderText.Text = "Typed, never added";
+            reminderMonth.SelectedIndex = 0; reminderDay.SelectedIndex = 0; reminderTime.SelectedIndex = 0;
+            Apply();
+            log.Add("after Apply, the list here: " + list());
+            return string.Join("\r\n", log);
         }
 
         /// <summary>
@@ -665,7 +804,8 @@ namespace ReadyLauncher
                 Animation = AnimationOrder[Math.Max(0, animation.SelectedIndex)], AnimationSpeed = (int)animationSpeed.Value,
                 AnimateNotes = animateNotes.IsChecked == true, AnimateSensors = animateSensors.IsChecked == true,
                 AnimateDock = animateDock.IsChecked == true, AnimateVolume = animateVolume.IsChecked == true,
-                LampPanel = (LampPanelPlace)Math.Max(0, lampPlace.SelectedIndex), LampMode = (LampActivity)Math.Max(0, lampMode.SelectedIndex)
+                LampPanel = (LampPanelPlace)Math.Max(0, lampPlace.SelectedIndex), LampMode = (LampActivity)Math.Max(0, lampMode.SelectedIndex),
+                LampMonitor = (LampMonitorPlace)Math.Max(0, lampMonitor.SelectedIndex)
             };
         }
 
@@ -703,6 +843,7 @@ namespace ReadyLauncher
                 animateVolume.IsChecked = l.AnimateVolume;
                 lampPlace.SelectedIndex = Math.Max(0, (int)l.LampPanel);
                 lampMode.SelectedIndex = Math.Max(0, (int)l.LampMode);
+                lampMonitor.SelectedIndex = Math.Max(0, (int)l.LampMonitor);
             }
             theme = l.SettingsTheme;
             SettingsTheme.Apply(this, theme);   // this window takes the theme's colors right away
@@ -968,6 +1109,12 @@ namespace ReadyLauncher
             s.OwnLook = s.Theme.Length > 0 ? ownLook : null;
             s.LampPanel = (LampPanelPlace)Math.Max(0, lampPlace.SelectedIndex);
             s.LampMode = (LampActivity)Math.Max(0, lampMode.SelectedIndex);
+            s.LampMonitor = (LampMonitorPlace)Math.Max(0, lampMonitor.SelectedIndex);
+            s.LampText = lampText.Text.Trim();
+            s.LampTextMode = s.LampText.Length == 0 ? LampTextEffect.None : (LampTextEffect)Math.Max(0, lampTextMode.SelectedIndex);
+            s.LampTextSides = lampTextSides.IsChecked == true;
+            AddReminderFromFields();   // text typed for a new reminder but not added yet is kept too
+            s.Reminders = reminders.Select(r => new LampReminder { At = r.At, Text = r.Text }).ToList();
 
             s.Dock = (DockSource)dockSource.SelectedIndex;
             s.DockCount = (int)dockCount.Value;

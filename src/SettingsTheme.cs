@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Markup;
 using System.Windows.Media;
@@ -147,6 +148,43 @@ namespace ReadyLauncher
             return b;
         }
 
+        /// <summary>The theme right-click menus use: the Settings theme (set whenever the settings are applied).</summary>
+        public static SettingsThemeMode MenuMode = SettingsThemeMode.FollowSystem;
+        static ResourceDictionary menuStyles;
+
+        /// <summary>
+        /// Puts a right-click menu (and its submenus) in the theme's colors, with a look to match the theme's drop-down
+        /// lists: rounded, a soft shadow, items that light up as you point at them, an accent tick on chosen ones.
+        /// A menu opens in a window of its own, outside any themed window, so it gets the colors itself.
+        /// </summary>
+        public static ContextMenu ThemeMenu(ContextMenu menu)
+        {
+            int p = PaletteFor(MenuMode);
+            var rd = new ResourceDictionary();
+            for (int i = 0; i < Keys.Length; i++)
+            {
+                var b = new SolidColorBrush((Color)ColorConverter.ConvertFromString(Palettes[p][i]));
+                b.Freeze();
+                rd["T." + Keys[i]] = b;
+            }
+            if (menuStyles == null) menuStyles = (ResourceDictionary)XamlReader.Parse(Head + MenuXaml + Tail);
+            rd.MergedDictionaries.Add(menuStyles);
+            menu.Resources = rd;
+            menu.Style = (Style)menuStyles[typeof(ContextMenu)];
+            return menu;
+        }
+
+        /// <summary>
+        /// A menu entry: a heading or note (a TextBlock) becomes a plain label that doesn't light up or take the
+        /// keyboard; anything else stays as it is.
+        /// </summary>
+        public static object MenuEntry(object o)
+        {
+            var tb = o as TextBlock;
+            if (tb == null) return o;
+            return new MenuItem { Header = tb, IsHitTestVisible = false, Focusable = false, Padding = new Thickness(8, 1, 10, 1) };
+        }
+
         /// <summary>The slim scroll bar styles, colored by "T.Thumb" / "T.ThumbHover" brushes that the user of them provides.</summary>
         public static ResourceDictionary ScrollBarStyles()
         {
@@ -230,6 +268,93 @@ namespace ReadyLauncher
     </Style.Triggers>
   </Style>
 
+";
+
+        // Right-click menus: the menu, its items (with icons, ticks, shortcut keys and submenus) and separators.
+        const string MenuXaml = @"
+  <Style TargetType='{x:Type ContextMenu}'>
+    <Setter Property='OverridesDefaultStyle' Value='True'/>
+    <Setter Property='SnapsToDevicePixels' Value='True'/>
+    <Setter Property='Foreground' Value='{DynamicResource T.Text}'/>
+    <Setter Property='Background' Value='{DynamicResource T.Control}'/>
+    <Setter Property='BorderBrush' Value='{DynamicResource T.Border}'/>
+    <Setter Property='FontSize' Value='12.5'/>
+    <Setter Property='Template'>
+      <Setter.Value>
+        <ControlTemplate TargetType='{x:Type ContextMenu}'>
+          <Border Margin='0,0,8,8' Background='{TemplateBinding Background}' BorderBrush='{TemplateBinding BorderBrush}'
+                  BorderThickness='1' CornerRadius='6' Padding='4'>
+            <Border.Effect><DropShadowEffect BlurRadius='10' ShadowDepth='2' Direction='270' Opacity='0.35'/></Border.Effect>
+            <StackPanel IsItemsHost='True' Grid.IsSharedSizeScope='True' KeyboardNavigation.DirectionalNavigation='Cycle'/>
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style TargetType='{x:Type MenuItem}'>
+    <Setter Property='OverridesDefaultStyle' Value='True'/>
+    <Setter Property='SnapsToDevicePixels' Value='True'/>
+    <Setter Property='Foreground' Value='{DynamicResource T.Text}'/>
+    <Setter Property='Padding' Value='8,5,10,5'/>
+    <Setter Property='Template'>
+      <Setter.Value>
+        <ControlTemplate TargetType='{x:Type MenuItem}'>
+          <Border x:Name='bd' Background='Transparent' CornerRadius='4' Padding='{TemplateBinding Padding}'>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width='Auto' MinWidth='24' SharedSizeGroup='MenuIcon'/>
+                <ColumnDefinition Width='*'/>
+                <ColumnDefinition Width='Auto' SharedSizeGroup='MenuKeys'/>
+                <ColumnDefinition Width='14'/>
+              </Grid.ColumnDefinitions>
+              <ContentPresenter x:Name='icon' ContentSource='Icon' VerticalAlignment='Center' HorizontalAlignment='Left' Margin='0,0,8,0'/>
+              <Path x:Name='tick' Visibility='Collapsed' Data='M 1 6 L 4.5 9.5 L 11 2.5' Stroke='{DynamicResource T.Accent}' StrokeThickness='2'
+                    StrokeStartLineCap='Round' StrokeEndLineCap='Round' StrokeLineJoin='Round' VerticalAlignment='Center' HorizontalAlignment='Left' Margin='1,0,8,0'/>
+              <ContentPresenter Grid.Column='1' ContentSource='Header' RecognizesAccessKey='True' VerticalAlignment='Center'/>
+              <TextBlock Grid.Column='2' Text='{TemplateBinding InputGestureText}' Margin='24,0,0,0' Opacity='0.7' VerticalAlignment='Center'/>
+              <Path x:Name='arrow' Grid.Column='3' Visibility='Collapsed' Data='M 0 0 L 4 4 L 0 8 Z' Fill='{TemplateBinding Foreground}'
+                    HorizontalAlignment='Right' VerticalAlignment='Center'/>
+              <Popup x:Name='PART_Popup' Placement='Right' HorizontalOffset='4' VerticalOffset='-5' AllowsTransparency='True' Focusable='False'
+                     PopupAnimation='Fade' IsOpen='{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}'>
+                <Border Margin='0,0,8,8' Background='{DynamicResource T.Control}' BorderBrush='{DynamicResource T.Border}'
+                        BorderThickness='1' CornerRadius='6' Padding='4'>
+                  <Border.Effect><DropShadowEffect BlurRadius='10' ShadowDepth='2' Direction='270' Opacity='0.35'/></Border.Effect>
+                  <StackPanel IsItemsHost='True' Grid.IsSharedSizeScope='True' KeyboardNavigation.DirectionalNavigation='Cycle'/>
+                </Border>
+              </Popup>
+            </Grid>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property='Role' Value='SubmenuHeader'><Setter TargetName='arrow' Property='Visibility' Value='Visible'/></Trigger>
+            <Trigger Property='IsChecked' Value='True'>
+              <Setter TargetName='tick' Property='Visibility' Value='Visible'/>
+              <Setter TargetName='icon' Property='Visibility' Value='Collapsed'/>
+            </Trigger>
+            <Trigger Property='IsHighlighted' Value='True'><Setter TargetName='bd' Property='Background' Value='{DynamicResource T.Selection}'/></Trigger>
+            <Trigger Property='IsEnabled' Value='False'><Setter Property='Opacity' Value='0.45'/></Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key='{x:Static MenuItem.SeparatorStyleKey}' TargetType='{x:Type Separator}'>
+    <Setter Property='OverridesDefaultStyle' Value='True'/>
+    <Setter Property='Template'>
+      <Setter.Value>
+        <ControlTemplate TargetType='{x:Type Separator}'>
+          <Border Height='1' Margin='8,4' Background='{DynamicResource T.Border}' SnapsToDevicePixels='True'/>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style TargetType='{x:Type ToolTip}'>
+    <Setter Property='Foreground' Value='{DynamicResource T.Text}'/>
+    <Setter Property='Background' Value='{DynamicResource T.Panel}'/>
+    <Setter Property='BorderBrush' Value='{DynamicResource T.BorderStrong}'/>
+  </Style>
 ";
 
         const string Styles = Head + @"

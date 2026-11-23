@@ -158,6 +158,18 @@ namespace ReadyLauncher
 
         static void Collect(DependencyObject v, FrameworkElement el, GeometryGroup g)
         {
+            // The lamp strip's monitor is drawn rather than built from borders: take its case's outline.
+            var monitor = v as LampMonitor;
+            if (monitor != null && monitor.IsVisible && monitor.ActualWidth > 0 && monitor.ActualHeight > 0)
+            {
+                try
+                {
+                    var r = monitor.TransformToAncestor(el).TransformBounds(new Rect(0, 0, monitor.ActualWidth, monitor.ActualHeight));
+                    g.Children.Add(Shapes.Rounded(r, LampMonitor.CaseCorners));
+                    return;
+                }
+                catch (InvalidOperationException) { }
+            }
             var b = v as Border;
             if (b != null && b.IsVisible && Shapes.AnyRounding(b.CornerRadius) && Painted(b.Background) && b.ActualWidth > 0 && b.ActualHeight > 0)
             {

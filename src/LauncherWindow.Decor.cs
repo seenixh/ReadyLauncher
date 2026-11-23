@@ -433,6 +433,9 @@ namespace ReadyLauncher
                         };
                         et.Start();
                     }
+                    else if (action.StartsWith("docktest:")) TestDock(action.Substring(9));
+                    else if (action.StartsWith("lamptest:")) TestLamps(action.Substring(9));
+                    else if (action.StartsWith("menushot:")) SaveMenuPictures(action.Substring(9));
                     else if (action.StartsWith("volumeright:") || action == "volumeslider")
                     {
                         // Test copies only: a right-click on volume button n, or a press and let-go on the slider, a few
@@ -451,6 +454,7 @@ namespace ReadyLauncher
                     else if (action.StartsWith("animcheck:")) TestAnimCheck(action.Substring(10));
                     else if (action.StartsWith("animshots:")) TestAnimShots(action.Substring(10));
                     else if (action.StartsWith("animframes:")) TestAnimFrames(action.Substring(11));
+                    else if (action.StartsWith("lampanim:")) TestLampAnimFrames(action.Substring(9));
                     else if (action.StartsWith("animfps:")) TestAnimFps(action.Substring(8));
                     else if (action.StartsWith("sensormove:"))
                     {
