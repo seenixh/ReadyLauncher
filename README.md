@@ -42,9 +42,9 @@ quick launch strip's icons.
 
 | To do this | Do this |
 |---|---|
-| Open / hide the launcher | Press **Ctrl + Alt + L** (change it in Settings), click the tray icon, or click the pinned icon. **Esc** hides it. |
+| Open / hide the launcher | Press **Ctrl + Alt + L** (change it in Settings), click the tray icon, or click the pinned icon (which only opens it). While the launcher is showing, one press hides it, whatever has the focus; with Settings or a dialog open and another app in use, the first press brings the launcher forward instead, so nothing typed there is lost. **Esc** hides it. |
 | Hide or show the sensor bar | Click the sensors button (a pulse line) in the header, next to the notes button. It only appears when sensors are chosen in Settings → Hardware monitoring, is dimmed while the bar is hidden, and the launcher remembers the choice. Choosing different sensors in Settings shows the bar again. |
-| Keep the launcher open in the background | Click the unpin button in the header (next to ✕), or right-click an empty spot → *Send to background*. The launcher (with its notes, sensors and strip) moves behind your other windows and stays open: it doesn't close itself when you click elsewhere or open an app from it. The shortcut key brings it forward. Click the button again (*Keep on top again*) to put it back on top; once it's closed, it opens always on top again. |
+| Keep the launcher open in the background | Click the unpin button in the header (next to ✕), or right-click an empty spot → *Send to background*. The launcher (with its notes, sensors and strip) moves behind your other windows and stays open: it doesn't close itself when you click elsewhere or open an app from it. The shortcut key brings it forward when another window is over it, and hides it when nothing is. Click the button again (*Keep on top again*) to put it back on top; once it's closed, it opens always on top again. |
 | Add an app, file or folder | Drag it from Explorer, the desktop or the Start menu onto the launcher (it keeps its own icon), or click **+** and browse to it. |
 | Add a web link | Drag a link from your browser, or **+** → *Add a web link*. |
 | Move an icon | Drag it anywhere. |

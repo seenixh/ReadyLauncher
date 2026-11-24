@@ -28,7 +28,7 @@ namespace ReadyLauncher
             { "Hardware monitoring", "Live readings (processor, memory, network, temperatures...) in a bar above the launcher." },
 
             // General
-            { "Open launcher with", "The key combination that opens or hides the launcher from anywhere in Windows. Click the box, then press the keys." },
+            { "Open launcher with", "The key combination that opens or hides the launcher from anywhere in Windows: one press hides it while it's showing, whatever you're using. Click the box, then press the keys." },
             { "Launcher size", "How big the launcher window is: a preset size, or your own width and height in pixels." },
             { "Open / close animation", "How the launcher appears and disappears. Randomize picks a different one of these each time it opens: fade, slide up or down, zoom, pop, blur, TV static (it comes and goes through snow, like an old TV between channels), flip (each window turns away like a card, and back), digital rain (green characters pour down over the windows), beam (threads of gold light run through the windows and they glow away into light, and back, like a sci-fi transporter), glass (the windows shimmer in like clean glass and shatter apart when they close), or no animation." },
             { "Animation speed", "How fast the open and close animations play: 100% is normal, lower is slower, higher is faster." },

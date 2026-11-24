@@ -10,8 +10,8 @@ using WF = System.Windows.Forms;
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]
 [assembly: System.Reflection.AssemblyTitle("Ready Launcher")]
 [assembly: System.Reflection.AssemblyProduct("Ready Launcher")]
-[assembly: System.Reflection.AssemblyVersion("1.86.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.86.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.87.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.87.0.0")]
 
 namespace ReadyLauncher
 {
@@ -374,8 +374,9 @@ namespace ReadyLauncher
             catch (Exception) { }
             ModalOpen = true;
             settings.Closed += delegate { settings = null; ModalOpen = false; };
+            settings.ShowActivated = !Program.TestMode;
             settings.Show();
-            settings.Activate();
+            if (!Program.TestMode) settings.Activate();
         }
 
         /// <summary>Settings at the lamp strip's reminder.</summary>
@@ -384,6 +385,8 @@ namespace ReadyLauncher
             OpenSettings(1);
             if (settings != null) settings.ShowReminder();
         }
+
+        public bool SettingsOpen { get { return settings != null; } }
 
         /// <summary>Settings closes when the launcher closes (changes not applied yet are dropped, as with Cancel).</summary>
         public void CloseSettings()

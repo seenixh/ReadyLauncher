@@ -58,6 +58,7 @@ namespace ReadyLauncher
             Background = Brushes.Transparent;
             ResizeMode = ResizeMode.CanResize;
             ShowInTaskbar = false;
+            ShowActivated = !Program.TestMode;   // test copies never take the focus from you
             Topmost = true;
             MinWidth = 420 + 2 * Shadow;
             MinHeight = 300 + 2 * Shadow;
@@ -416,9 +417,12 @@ namespace ReadyLauncher
             if (!IsVisible) { if (appearing) PrepareAnimateIn(); Show(); }
             if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
             Topmost = !inBackground;   // sent to the background: comes to the front, but not always on top
-            Activate();
-            Native.SetForegroundWindow(new WindowInteropHelper(this).Handle);
-            Focus();
+            if (!Program.TestMode)
+            {
+                Activate();
+                Native.SetForegroundWindow(new WindowInteropHelper(this).Handle);
+                Focus();
+            }
             if (appearing) AnimateIn();
             PrepareCompanions(appearing);   // the notes, sensors, strip and volume windows that animate too start invisible
             UpdateLampWindow();
@@ -449,10 +453,26 @@ namespace ReadyLauncher
             AnimateOut(() => { Hide(); StopAnimations(); LeaveBackground(); });   // closed: always on top again next time
         }
 
+        /// <summary>The shortcut key or the tray icon: closes the launcher when it's showing, and opens it otherwise.</summary>
         public void Toggle()
         {
-            if (IsVisible && (IsActive || NotesActive) && !hiding) HideLauncher();
+            if (ClosesOnToggle()) HideLauncher();
             else ShowLauncher();
+        }
+
+        /// <summary>
+        /// Whether the shortcut key closes the launcher now. It does whenever the launcher is showing, whatever has the
+        /// focus (a desktop icon, say), and leaves the focus there. It brings the launcher to the front instead when
+        /// it's out of sight, or when Settings or a dialog is open and another app has the focus, so that nothing
+        /// being typed there is lost.
+        /// </summary>
+        bool ClosesOnToggle()
+        {
+            if (!IsVisible || hiding || WindowState == WindowState.Minimized) return false;
+            if (IsActive || NotesActive) return true;
+            if (app.ModalOpen || app.SettingsOpen) return false;
+            if (Native.IsCloaked(new WindowInteropHelper(this).Handle)) return false;   // on another virtual desktop
+            return !inBackground || InPlainSight();
         }
 
         /// <summary>Remember which app was in front, so key-combo shortcuts can be sent back to it.</summary>

@@ -68,6 +68,22 @@ namespace ReadyLauncher
             return sb.ToString();
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        public struct ScreenPoint { public int X, Y; }
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr WindowFromPoint(ScreenPoint p);
+
+        [DllImport("dwmapi.dll")]
+        static extern int DwmGetWindowAttribute(IntPtr hwnd, int attr, out int value, int size);
+
+        /// <summary>Open, but not shown by Windows: on another virtual desktop.</summary>
+        public static bool IsCloaked(IntPtr hwnd)
+        {
+            int cloaked;
+            return DwmGetWindowAttribute(hwnd, 14, out cloaked, 4) == 0 && cloaked != 0;   // DWMWA_CLOAKED
+        }
+
         [DllImport("dwmapi.dll")]
         public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 

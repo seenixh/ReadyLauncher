@@ -65,7 +65,7 @@ namespace ReadyLauncher
                 if (sh != IntPtr.Zero && w.IsVisible) Native.SetWindowPos(sh, Native.HWND_BOTTOM, 0, 0, 0, 0, keep);
             }
             Native.SetWindowPos(new WindowInteropHelper(this).Handle, Native.HWND_BOTTOM, 0, 0, 0, 0, keep);
-            if (prevForeground != IntPtr.Zero) Native.SetForegroundWindow(prevForeground);
+            if (prevForeground != IntPtr.Zero && !Program.TestMode) Native.SetForegroundWindow(prevForeground);
             ShowBackgroundButtonState();
         }
 
@@ -76,6 +76,26 @@ namespace ReadyLauncher
             ApplyLayer();
             Activate();
             ShowBackgroundButtonState();
+        }
+
+        /// <summary>No other app's window is over any part of the launcher (checked at points spread across it).</summary>
+        bool InPlainSight()
+        {
+            const int columns = 8, rows = 6;
+            double w = ActualWidth - 2 * Shadow, h = ActualHeight - 2 * Shadow;
+            bool seen = false;
+            for (int r = 0; r < rows; r++)
+                for (int c = 0; c < columns; c++)
+                {
+                    var at = PointToScreen(new Point(Shadow + w * (c + 0.5) / columns, Shadow + h * (r + 0.5) / rows));
+                    IntPtr there = Native.WindowFromPoint(new Native.ScreenPoint { X = (int)at.X, Y = (int)at.Y });
+                    if (there == IntPtr.Zero) continue;   // off the screen
+                    uint pid;
+                    Native.GetWindowThreadProcessId(there, out pid);
+                    if (pid != OwnPid) return false;
+                    seen = true;
+                }
+            return seen;
         }
 
         /// <summary>When the launcher closes: the next time it opens, it's always on top again.</summary>
