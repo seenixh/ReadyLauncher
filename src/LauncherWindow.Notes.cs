@@ -24,6 +24,7 @@ namespace ReadyLauncher
                 if (Data.NoteTabs.Count == 0) Data.Normalize();
                 notesWindow = new NotesWindow(NotesWindowBrush(), NotesChromeColor, TextColorFor(Luminance(bg)), border, NotesAreaColor(),
                                               Data.NoteTabs, Data.NoteTabIndex, S.NotesFontSize);
+                Satellite(notesWindow);
                 notesWindow.Topmost = !inBackground;
                 notesWindow.TextEdited += OnNotesEdited;
                 notesWindow.EscapePressed += HideLauncher;
@@ -51,6 +52,7 @@ namespace ReadyLauncher
                 notesWindow.SizeChanged += delegate { PlaceOutsideVolume(); };
             }
             if (notesWindow.Owner == null) notesWindow.Owner = this;
+            PlaceNotes(true);   // in place before it shows
             notesWindow.Show();
             PlaceNotes();
         }
@@ -185,9 +187,9 @@ namespace ReadyLauncher
             PlaceOutsideVolume();
         }
 
-        void PlaceNotes()
+        void PlaceNotes(bool evenHidden = false)
         {
-            if (notesWindow == null || !notesWindow.IsVisible) return;
+            if (notesWindow == null || (!notesWindow.IsVisible && !evenHidden)) return;
             double gap = Math.Max(0, S.NotesGap) / DpiScale;
             double w = Math.Max(160, S.NotesWidth) / DpiScale;
             notesWindow.Width = w;

@@ -148,6 +148,9 @@ namespace ReadyLauncher
                 Dispatcher.BeginInvoke(new Action(() => { if (!closed && theme == SettingsThemeMode.FollowSystem) SettingsTheme.Apply(this, theme); }));
             Microsoft.Win32.SystemEvents.UserPreferenceChanged += systemChanged;
             Closed += delegate { closed = true; Microsoft.Win32.SystemEvents.UserPreferenceChanged -= systemChanged; };
+            // Closing, Settings goes at once. Fading out, it stayed on screen a moment longer, and the launcher (which comes
+            // forward as Settings closes) and the windows around it came up over it, part by part.
+            Closing += delegate { GoNow(); };
 
             tabs = new TabControl { Margin = new Thickness(12, 12, 12, 0) };
             tabs.Items.Add(new TabItem { Header = "General", Content = Scrolling(BuildGeneral(s)) });
@@ -161,7 +164,7 @@ namespace ReadyLauncher
 
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(12) };
             var ok = new Button { Content = "OK", Width = 90, IsDefault = true, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(0, 4, 0, 4) };
-            ok.Click += delegate { if (Apply()) Close(); };
+            ok.Click += delegate { ApplyAndClose(); };
             var apply = new Button { Content = "Apply", Width = 90, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(0, 4, 0, 4), ToolTip = "Try the changes and keep this window open" };
             apply.Click += delegate { Apply(); };
             var cancel = new Button { Content = "Cancel", Width = 90, IsCancel = true, Padding = new Thickness(0, 4, 0, 4) };
@@ -1795,11 +1798,58 @@ namespace ReadyLauncher
 
         bool Fail(string message)
         {
+            if (quietFailures) { TestFailure = message; return false; }
             MessageBox.Show(this, message, Program.AppName, MessageBoxButton.OK, MessageBoxImage.Information);
             return false;
         }
 
-        bool Apply()
+        bool closingAfterOk, quietFailures;
+        /// <summary>Test copies only: why the test's OK couldn't apply the settings (no message is shown then).</summary>
+        internal string TestFailure;
+        /// <summary>Whether Windows took Settings out of sight at once, with nothing fading, as it went.</summary>
+        internal bool WentAtOnce;
+        /// <summary>Test copies only: told when Settings goes out of sight.</summary>
+        internal Action Gone;
+
+        /// <summary>
+        /// OK: Settings goes out of sight at once, and only then is the launcher changed (its windows made again in the
+        /// new colors, which come up in front of everything); then Settings closes. Changed while Settings was still on
+        /// screen, the launcher's windows came up over it, part by part, and over Windows' fading copy of it as it closed.
+        /// </summary>
+        void ApplyAndClose()
+        {
+            if (closingAfterOk) return;
+            if (!Apply(true)) return;   // checked first, so a setting that can't be used is said with Settings still there
+            closingAfterOk = true;
+            GoNow();
+            Apply();
+            Close();
+        }
+
+        /// <summary>Out of sight at once: no fade by Windows (it's kept out of sight by Windows' compositor, then hidden).</summary>
+        void GoNow()
+        {
+            if (wentOut) return;
+            wentOut = true;
+            var h = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            bool noFade = Native.NoTransitions(h);
+            WentAtOnce = Native.Cloak(h, true) || noFade;
+            if (IsVisible) Hide();
+            if (Gone != null) Gone();
+        }
+
+        bool wentOut;
+
+        /// <summary>Test copies only: OK, as if clicked; a change that can't be applied is noted, not shown in a message.</summary>
+        internal void TestOk()
+        {
+            quietFailures = true;
+            try { ApplyAndClose(); }
+            finally { quietFailures = false; }
+        }
+
+        /// <summary>Use the settings as they are now in this window; with <paramref name="checkOnly"/>, only see that they can be.</summary>
+        bool Apply(bool checkOnly = false)
         {
             var s = app.Data.Settings;
             string hardwareProblem = HardwareProblem();
@@ -1832,6 +1882,7 @@ namespace ReadyLauncher
                 if (!int.TryParse(customW.Text.Trim(), out cw) || !int.TryParse(customH.Text.Trim(), out ch) || cw < 400 || ch < 300 || cw > 7680 || ch > 4320)
                     return Fail("Enter a custom size between 400 x 300 and 7680 x 4320 pixels.");
             }
+            if (checkOnly) return true;
 
             bool resize = sizeMode != s.WindowSize || (sizeMode == WindowSizeMode.Custom && (cw != s.CustomWidthPx || ch != s.CustomHeightPx));
 

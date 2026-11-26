@@ -235,17 +235,91 @@ namespace ReadyLauncher
             StyleScrollBar();
             SyncSideBar();
 
-            if (outsideVolume != null) { outsideVolume.Close(); outsideVolume = null; } // recreate in the new colors
-            CloseNotes();
-            CloseSensors();   // recreated in the new colors
-            CloseLampWindow();   // recreated with the new activity and edge color
-            UpdateLampWindow();
-            UpdateDetachedDock();
-            UpdateSensors();
-            UpdateNotes();
-            UpdateOutsideVolume();
+            // The windows around the launcher are made again, in the new colors (the strip with its new activity and edge
+            // color). The new ones come up in front of the old ones, which stay until the new ones are drawn: closed first,
+            // they left a gap for a moment, and the new ones came back one by one.
+            var old = new List<Window>();
+            if (outsideVolume != null) { old.Add(outsideVolume); outsideVolume = null; }
+            if (notesWindow != null) { FlushNotes(); old.Add(notesWindow); notesWindow = null; }
+            if (sensorWindow != null) { old.Add(sensorWindow); sensorWindow = null; }
+            if (lampWindow != null) { old.Add(lampWindow); lampWindow = null; }
+            rebuilding = true;   // (the new ones are kept out of sight until they're in place and drawn: see Satellite)
+            try
+            {
+                UpdateLampWindow();
+                UpdateDetachedDock();
+                UpdateSensors();
+                UpdateNotes();
+                UpdateOutsideVolume();
+            }
+            finally { rebuilding = false; }
             RenderItems();
             UpdateAppWatching();
+            if (old.Count > 0) AfterRedraw(() => { foreach (var w in old) GoAtOnce(w); });
+        }
+
+        List<Action> afterRedraw;
+
+        /// <summary>
+        /// Run <paramref name="act"/> once what was just changed is on screen: when everything waiting has been done
+        /// (windows laid out and drawn), and a moment later, as new windows take a frame or two more to appear. Several
+        /// asked for meanwhile run together, in the order asked.
+        /// </summary>
+        public void AfterRedraw(Action act)
+        {
+            if (afterRedraw != null) { afterRedraw.Add(act); return; }
+            afterRedraw = new List<Action> { act };
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
+                t.Tick += delegate
+                {
+                    t.Stop();
+                    var acts = afterRedraw;
+                    afterRedraw = null;
+                    foreach (var a in acts) a();
+                };
+                t.Start();
+            }), DispatcherPriority.ApplicationIdle);
+        }
+
+        /// <summary>Close a window out of sight at once, with nothing fading (it's behind the window that took its place).</summary>
+        static void GoAtOnce(Window w)
+        {
+            var h = new WindowInteropHelper(w).Handle;
+            Native.NoTransitions(h);
+            Native.Cloak(h, true);
+            w.Close();
+        }
+
+        bool rebuilding;
+
+        /// <summary>
+        /// A window around the launcher, as it's made: Windows' own fade as it shows, hides or closes is off (the launcher
+        /// animates it itself). Made again for a settings change, it's also kept out of sight until it's in place and
+        /// drawn, so it comes up in one go over the window it replaces, never anywhere else first.
+        /// </summary>
+        void Satellite(Window w)
+        {
+            w.SourceInitialized += delegate
+            {
+                var h = new WindowInteropHelper(w).Handle;
+                Native.NoTransitions(h);
+                if (!rebuilding || !Native.Cloak(h, true)) return;
+                bool hidden = true;
+                Action reveal = () => { if (hidden) { hidden = false; Native.Cloak(h, false); } };
+                // Once drawn, and a moment more (the first frame reaches the screen a little after); at the latest after
+                // a second, whatever happens.
+                w.ContentRendered += delegate
+                {
+                    var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+                    t.Tick += delegate { t.Stop(); reveal(); };
+                    t.Start();
+                };
+                var latest = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+                latest.Tick += delegate { latest.Stop(); reveal(); };
+                latest.Start();
+            };
         }
 
         /// <summary>
@@ -536,6 +610,7 @@ namespace ReadyLauncher
             {
                 var back = new SolidColorBrush(Color.FromArgb((byte)(255 * bgAlpha), bg.R, bg.G, bg.B));
                 outsideVolume = new VolumeWindow(back, new SolidColorBrush(VolumeColor(true)), new SolidColorBrush(FrameBorder), VolumeLookNow());
+                Satellite(outsideVolume);
                 HookVolume(outsideVolume.Panel);
                 outsideVolume.Deactivated += OnDeactivated;   // clicking away from it counts as clicking away from the launcher
                 outsideVolume.Owner = this;

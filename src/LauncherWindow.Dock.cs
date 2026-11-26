@@ -190,6 +190,7 @@ namespace ReadyLauncher
             if (dockWindow == null)
             {
                 dockWindow = new DockWindow();
+                Satellite(dockWindow);
                 dockWindow.Topmost = !inBackground;   // behind other windows too while the launcher is sent to the background
                 // It sizes itself to the icons after being shown, so line it up again once its size settles.
                 dockWindow.SizeChanged += delegate { PlaceSatellites(); };

@@ -52,6 +52,7 @@ namespace ReadyLauncher
             {
                 var edge = Color.FromArgb((byte)(255 * Math.Max(0.4, bgAlpha)), FrameBorder.R, FrameBorder.G, FrameBorder.B);
                 lampWindow = new LampWindow(S.LampMode, S.LampRows, edge, Corner, LampAbove, S.LampMonitor);
+                Satellite(lampWindow);
                 lampWindow.Lamps.Palette = LampPalette.From(S);
                 if (lampWindow.Monitor != null) lampWindow.Monitor.Lamps.Palette = LampPalette.From(S);
                 HookLampStrip(lampWindow.Lamps, false);
@@ -537,6 +538,8 @@ namespace ReadyLauncher
                                   + ", on its edge " + reaches(new Point(ball.ActualWidth / 2 + 16, ball.ActualHeight / 2)) + ", in the window's corner " + reaches(new Point(4, 4)));
                         }
                     }
+                    else if (step == "menufade") SettingsTheme.TestCloseAtOnce(write);
+                    else if (step == "settingsok") app.TestSettingsOk(write);
                     else if (step == "ballnow")
                     {
                         // the ball, its answer on the strip, and the monitor

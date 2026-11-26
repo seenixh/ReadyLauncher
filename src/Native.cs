@@ -88,6 +88,49 @@ namespace ReadyLauncher
         public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
         public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20, DWMWA_CAPTION_COLOR = 35, DWMWA_TEXT_COLOR = 36;
+        public const int DWMWA_TRANSITIONS_FORCEDISABLED = 3;
+
+        /// <summary>
+        /// Windows' own animation switched off for a window: when it hides or closes it goes at once, rather than fading
+        /// out under whatever comes in front of it meanwhile. True if Windows took it.
+        /// </summary>
+        public static bool NoTransitions(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return false;
+            int on = 1;
+            try { return DwmSetWindowAttribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, ref on, 4) == 0; }
+            catch (Exception) { return false; }
+        }
+
+        public const int DWMWA_CLOAK = 13;
+
+        /// <summary>
+        /// Kept out of sight by Windows' compositor (at once, with nothing fading), though the window is still open and
+        /// shown; or back in sight. True if Windows took it.
+        /// </summary>
+        public static bool Cloak(IntPtr hwnd, bool on)
+        {
+            if (hwnd == IntPtr.Zero) return false;
+            int v = on ? 1 : 0;
+            try { return DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, ref v, 4) == 0; }
+            catch (Exception) { return false; }
+        }
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetTopWindow(IntPtr hwnd);
+
+        /// <summary>With <c>cmd</c> 2, the next window down (front to back).</summary>
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetWindow(IntPtr hwnd, uint cmd);
+
+        [DllImport("user32.dll")]
+        public static extern bool IsWindowVisible(IntPtr hwnd);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct Rect { public int Left, Top, Right, Bottom; }
+
+        [DllImport("user32.dll")]
+        public static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
 
         [DllImport("user32.dll")]
         public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);

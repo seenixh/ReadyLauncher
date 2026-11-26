@@ -10,8 +10,8 @@ using WF = System.Windows.Forms;
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]
 [assembly: System.Reflection.AssemblyTitle("Ready Launcher")]
 [assembly: System.Reflection.AssemblyProduct("Ready Launcher")]
-[assembly: System.Reflection.AssemblyVersion("2.4.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("2.4.0.0")]
+[assembly: System.Reflection.AssemblyVersion("2.4.3.0")]
+[assembly: System.Reflection.AssemblyFileVersion("2.4.3.0")]
 
 namespace ReadyLauncher
 {
@@ -407,19 +407,125 @@ namespace ReadyLauncher
 
         /// <summary>
         /// Put Settings back in front once the launcher has shown or rebuilt its windows (the notes, the strip, the
-        /// sensor bar and the volume control each come to the front when they're shown).
+        /// sensor bar and the volume control each come to the front when they're shown): right away, before they're drawn
+        /// in front of it, and again once anything put off till the app is idle has run.
         /// </summary>
         public void RaiseSettings()
         {
             var s = settings;
             if (s == null) return;
-            Dispatcher.BeginInvoke(new Action(() =>
+            Action raise = () =>
             {
                 if (settings != s || !s.IsVisible) return;
                 var h = new WindowInteropHelper(s).Handle;
                 if (h != IntPtr.Zero)
                     Native.SetWindowPos(h, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
-            }), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            };
+            raise();
+            Dispatcher.BeginInvoke(raise, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        }
+
+        /// <summary>
+        /// Test copies only: Settings opens over the launcher (not focused, as always in a test copy) and a moment later its
+        /// OK is clicked by the test, with nothing changed (the launcher still makes its windows again). For a second, the
+        /// app's windows on screen are noted front to back whenever that changes, with when each new one is first drawn and
+        /// each old one goes: Settings should go out of sight before any are made again, each new one should come into
+        /// sight only once drawn, in the right place and in front of the one it replaces, and only then should that go.
+        /// </summary>
+        internal void TestSettingsOk(Action<string> write)
+        {
+            OpenSettings();
+            var shown = settings;
+            if (shown == null) { write("settingsok: Settings didn't open"); return; }
+            var wait = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+            wait.Tick += delegate
+            {
+                wait.Stop();
+                var names = new System.Collections.Generic.Dictionary<IntPtr, string>();
+                var kinds = new System.Collections.Generic.Dictionary<string, int>();
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                Func<string> at = () => clock.ElapsedMilliseconds.ToString().PadLeft(4) + " ms";
+                Func<IntPtr, Window, string> name = (h, w) =>
+                {
+                    string n;
+                    if (names.TryGetValue(h, out n)) return n;
+                    string kind = w == shown ? "Settings" : w == Launcher ? "launcher" : w.GetType().Name;
+                    int c;
+                    kinds.TryGetValue(kind, out c);
+                    kinds[kind] = ++c;
+                    n = c == 1 ? kind : kind + (c == 2 ? " (new)" : " #" + c);
+                    names[h] = n;
+                    return n;
+                };
+                bool settingsBehind = false, oldInFront = false;
+                Func<string> order = () =>
+                {
+                    var ours = new System.Collections.Generic.Dictionary<IntPtr, Window>();
+                    foreach (Window w in Application.Current.Windows)
+                    {
+                        var h = new WindowInteropHelper(w).Handle;
+                        if (h != IntPtr.Zero) ours[h] = w;
+                    }
+                    var line = new System.Collections.Generic.List<string>();
+                    for (IntPtr h = Native.GetTopWindow(IntPtr.Zero); h != IntPtr.Zero; h = Native.GetWindow(h, 2))
+                        if (ours.ContainsKey(h) && Native.IsWindowVisible(h) && !Native.IsCloaked(h)) line.Add(name(h, ours[h]));
+                    if (line.IndexOf("Settings") > 0) settingsBehind = true;
+                    foreach (var n in line)
+                        if (line.IndexOf(n + " (new)") > line.IndexOf(n)) oldInFront = true;
+                    return line.Count == 0 ? "(none)" : string.Join(" > ", line);
+                };
+                // Where each of them is on screen (in pixels), for a window that shows somewhere it shouldn't for a moment.
+                Func<string> places = () =>
+                {
+                    var line = new System.Collections.Generic.List<string>();
+                    foreach (Window w in Application.Current.Windows)
+                    {
+                        var h = new WindowInteropHelper(w).Handle;
+                        Native.Rect r;
+                        if (h == IntPtr.Zero || !Native.IsWindowVisible(h) || Native.IsCloaked(h) || !Native.GetWindowRect(h, out r)) continue;
+                        line.Add(name(h, w) + " " + r.Left + "," + r.Top + " " + (r.Right - r.Left) + "x" + (r.Bottom - r.Top));
+                    }
+                    line.Sort(StringComparer.Ordinal);
+                    return string.Join("; ", line);
+                };
+                write("settingsok: front to back before OK: " + order());
+                write("  where: " + places());
+                var before = new System.Collections.Generic.HashSet<Window>();
+                foreach (Window w in Application.Current.Windows)
+                {
+                    before.Add(w);
+                    var ow = w;
+                    var h = new WindowInteropHelper(ow).Handle;
+                    string label = names.ContainsKey(h) ? names[h] : ow.GetType().Name + " (hidden)";
+                    if (ow != shown) ow.Closed += delegate { write("  " + at() + ": " + label + " gone"); };
+                }
+                shown.Gone = () => write("  " + at() + ": Settings out of sight, " + (shown.WentAtOnce ? "at once" : "FADING OUT (Windows didn't take it)")
+                                             + "; the launcher's windows not made again yet: " + (Application.Current.Windows.Count == before.Count ? "yes" : "NO"));
+                shown.Closing += delegate { write("  " + at() + ": Settings closing"); };
+                shown.TestOk();
+                write("  " + at() + ": OK done" + (shown.TestFailure != null ? ", but NOT APPLIED: " + shown.TestFailure : "") + "; front to back now: " + order());
+                foreach (Window w in Application.Current.Windows)
+                    if (!before.Contains(w))
+                    {
+                        var nw = w;
+                        nw.ContentRendered += delegate { write("  " + at() + ": " + name(new WindowInteropHelper(nw).Handle, nw) + " first drawn"); };
+                    }
+                string last = null, lastPlaces = null;
+                var sample = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Normal) { Interval = TimeSpan.FromMilliseconds(10) };
+                sample.Tick += delegate
+                {
+                    string now = order();
+                    if (now != last) { write("  " + at() + ": " + now); last = now; }
+                    string where = places();
+                    if (where != lastPlaces) { write("  " + at() + " where: " + where); lastPlaces = where; }
+                    if (clock.ElapsedMilliseconds < 1600) return;
+                    sample.Stop();
+                    write("  Settings in front of all the app's windows while it showed: " + (settingsBehind ? "NO" : "yes")
+                          + "; each new window in front of the one it replaced: " + (oldInFront ? "NO" : "yes"));
+                };
+                sample.Start();
+            };
+            wait.Start();
         }
 
         public void SettingsChanged(bool startWithWindows, bool resize)

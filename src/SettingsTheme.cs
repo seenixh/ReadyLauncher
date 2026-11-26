@@ -171,7 +171,129 @@ namespace ReadyLauncher
             rd.MergedDictionaries.Add(menuStyles);
             menu.Resources = rd;
             menu.Style = (Style)menuStyles[typeof(ContextMenu)];
+            CloseAtOnce(menu);
             return menu;
+        }
+
+        /// <summary>
+        /// A menu (and each of its submenus) still fades in as it opens, but goes at once when it closes. Fading out, it
+        /// stayed on screen a moment longer while what was chosen in it already happened, and the windows that changed or
+        /// came forward then (the lamp strip, the launcher) showed through it, part by part, before it was gone.
+        /// </summary>
+        static void CloseAtOnce(ContextMenu menu)
+        {
+            menu.Opened += delegate { StopFadeOut(PopupOf(menu), true); };
+            menu.AddHandler(MenuItem.SubmenuOpenedEvent, new RoutedEventHandler((s, e) =>
+            {
+                var item = e.OriginalSource as MenuItem;
+                if (item != null && item.Template != null)
+                    StopFadeOut(item.Template.FindName("PART_Popup", item) as System.Windows.Controls.Primitives.Popup, false);
+            }));
+        }
+
+        static readonly System.Reflection.FieldInfo menuPopupField = typeof(ContextMenu).GetField("_parentPopup", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        /// <summary>The popup a menu opens in: its logical parent (or, failing that, the one it keeps for itself).</summary>
+        static System.Windows.Controls.Primitives.Popup PopupOf(ContextMenu menu)
+        {
+            var popup = menu.Parent as System.Windows.Controls.Primitives.Popup;
+            if (popup == null && menuPopupField != null)
+                try { popup = menuPopupField.GetValue(menu) as System.Windows.Controls.Primitives.Popup; } catch (Exception) { }
+            return popup;
+        }
+
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<System.Windows.Controls.Primitives.Popup, object> fadeOutStopped =
+            new System.Runtime.CompilerServices.ConditionalWeakTable<System.Windows.Controls.Primitives.Popup, object>();
+
+        /// <summary>
+        /// Once <paramref name="popup"/> is open (and fading in), it closes without fading out; once closed, it gets its
+        /// animation back for the next time: a menu's own popup the system's menu animation, a submenu's its template's.
+        /// </summary>
+        static void StopFadeOut(System.Windows.Controls.Primitives.Popup popup, bool menuRoot)
+        {
+            if (popup == null) return;
+            object seen;
+            if (!fadeOutStopped.TryGetValue(popup, out seen))
+            {
+                object had = popup.ReadLocalValue(System.Windows.Controls.Primitives.Popup.PopupAnimationProperty);
+                fadeOutStopped.Add(popup, new object());
+                popup.Closed += delegate
+                {
+                    if (menuRoot) popup.SetResourceReference(System.Windows.Controls.Primitives.Popup.PopupAnimationProperty, SystemParameters.MenuPopupAnimationKey);
+                    else if (had is System.Windows.Controls.Primitives.PopupAnimation) popup.PopupAnimation = (System.Windows.Controls.Primitives.PopupAnimation)had;
+                    else popup.ClearValue(System.Windows.Controls.Primitives.Popup.PopupAnimationProperty);
+                };
+            }
+            // After it's shown: the fade-in has started by then, and carries on (the animation is only read as it opens and closes).
+            popup.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (popup.IsOpen) popup.PopupAnimation = System.Windows.Controls.Primitives.PopupAnimation.None;
+            }), System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+
+        /// <summary>
+        /// Test copies only. A themed menu gets the popup it opens in, as it does just before it opens (it isn't opened, so
+        /// it takes neither the mouse nor the keyboard), and that popup is found; its submenu's popup is found the way it is
+        /// when a submenu opens. Then popups nobody can see or click (see-through, in the screen's top-left corner, for
+        /// under a second) open fading in and close: two the way menus close now (one with the system's menu animation, as
+        /// a menu's own popup has, one with its own, as a submenu's has), and one the way they used to.
+        /// </summary>
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern bool IsWindowVisible(IntPtr hwnd);
+
+        internal static void TestCloseAtOnce(Action<string> write)
+        {
+            var nonPublic = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+            object seen;
+
+            var menu = ThemeMenu(new ContextMenu());
+            var sub = new MenuItem { Header = "A submenu" };
+            sub.Items.Add(new MenuItem { Header = "In it" });
+            menu.Items.Add(sub);
+            typeof(ContextMenu).GetMethod("HookupParentPopup", nonPublic).Invoke(menu, null);   // what it does just before it opens
+            var own = PopupOf(menu);
+            write("menufade: the system's menu animation is " + SystemParameters.MenuPopupAnimation + "; a menu's own popup: "
+                  + (own == null ? "NOT FOUND" : "found (" + (menu.Parent == own ? "its parent" : "kept by it") + "), animation " + own.PopupAnimation));
+            sub.ApplyTemplate();
+            sub.RaiseEvent(new RoutedEventArgs(MenuItem.SubmenuOpenedEvent, sub));   // (its popup isn't opened)
+            var subPopup = sub.Template == null ? null : sub.Template.FindName("PART_Popup", sub) as System.Windows.Controls.Primitives.Popup;
+            write("  a submenu's popup: " + (subPopup == null ? "NOT FOUND" : "found, animation " + subPopup.PopupAnimation + ", closes at once once open: " + fadeOutStopped.TryGetValue(subPopup, out seen)));
+
+            Func<string, System.Windows.Controls.Primitives.Popup> make = name => new System.Windows.Controls.Primitives.Popup
+            {
+                AllowsTransparency = true, PopupAnimation = System.Windows.Controls.Primitives.PopupAnimation.Fade, StaysOpen = true, Focusable = false,
+                Placement = System.Windows.Controls.Primitives.PlacementMode.AbsolutePoint, HorizontalOffset = 0, VerticalOffset = 0, Tag = name,
+                Child = new Border { Width = 4, Height = 4, Background = Brushes.Transparent, IsHitTestVisible = false }
+            };
+            var asMenu = make("like a menu's popup");
+            asMenu.SetResourceReference(System.Windows.Controls.Primitives.Popup.PopupAnimationProperty, SystemParameters.MenuPopupAnimationKey);
+            var asSub = make("like a submenu's popup");
+            var before = make("as before");
+            // Closing without a fade, a popup's window is hidden at once (and let go of a moment later); fading, it stays
+            // showing until the fade is over.
+            Func<System.Windows.Controls.Primitives.Popup, string> state = p =>
+            {
+                var source = PresentationSource.FromVisual(p.Child) as HwndSource;
+                return p.Tag + ": " + p.PopupAnimation + (p.IsOpen ? ", open" : ", closed")
+                    + (source == null ? ", its window gone" : IsWindowVisible(source.Handle) ? ", SHOWING" : ", hidden");
+            };
+            Func<string> all = () => state(asMenu) + " | " + state(asSub) + " | " + state(before);
+            Action<double, Action> later = (seconds, act) =>
+            {
+                var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(seconds) };
+                timer.Tick += delegate { timer.Stop(); act(); };
+                timer.Start();
+            };
+            asMenu.IsOpen = asSub.IsOpen = before.IsOpen = true;
+            StopFadeOut(asMenu, true);
+            StopFadeOut(asSub, false);
+            later(0.4, () =>
+            {
+                write("  open: " + all());
+                asMenu.IsOpen = asSub.IsOpen = before.IsOpen = false;
+                write("  just closed: " + all());
+                later(0.3, () => write("  0.3 s later: " + all()));
+            });
         }
 
         /// <summary>A color of the menus' theme as it is now: "Border", "Accent" and so on.</summary>

@@ -62,6 +62,7 @@ namespace ReadyLauncher
                 var back = new SolidColorBrush(Color.FromArgb((byte)(255 * Math.Max(0.55, bgAlpha)), backColor.R, backColor.G, backColor.B));
                 var border = new SolidColorBrush(Color.FromArgb(0x99, FrameBorder.R, FrameBorder.G, FrameBorder.B));
                 sensorWindow = new SensorWindow(back, textColor, border);
+                Satellite(sensorWindow);
                 sensorWindow.Topmost = !inBackground;
                 sensorWindow.SizeChanged += delegate { PlaceSensors(); };
                 sensorWindow.OrderChanged += ids =>
