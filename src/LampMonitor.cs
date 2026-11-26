@@ -10,8 +10,8 @@ namespace ReadyLauncher
 {
     /// <summary>
     /// A computer cabinet standing at one end of the lamp strip and rising above it: a charcoal case with a rolled top,
-    /// a dark window with lamps blinking behind it (spaced well apart, fewer lit than on the strip), and WOPR lettered
-    /// below. It's drawn rather than a picture, so it's sharp at any screen scale, seen straight on like the strip.
+    /// a dark window with lamps blinking behind it (spaced well apart, fewer lit than on the strip) and a small board of
+    /// tiny red LEDs flashing in the middle of it, and WOPR lettered below. It's drawn rather than a picture, so it's sharp at any screen scale, seen straight on like the strip.
     /// </summary>
     internal class LampMonitor : Grid
     {
@@ -21,6 +21,25 @@ namespace ReadyLauncher
         static readonly Rect Glass = new Rect(17, 29, 96, 46);   // the window on the front
 
         public LampPanel Lamps { get; private set; }
+
+        /// <summary>The small board of red LEDs in the middle of its window.</summary>
+        public LedBoard Board { get; private set; }
+
+        /// <summary>The Magic 8 Ball in its window, or null.</summary>
+        public EightBall Ball { get; private set; }
+
+        /// <summary>Puts the Magic 8 Ball in its window, in front of the lamps, behind the glass.</summary>
+        public EightBall AddBall()
+        {
+            if (Ball != null) return Ball;
+            Ball = new EightBall { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(Glass.X, Glass.Y, 0, 0), Width = Glass.Width, Height = Glass.Height };
+            Children.Insert(Children.Count - 1, Ball);
+            Board.Visibility = Visibility.Collapsed;   // the ball takes the middle of the window
+            // No lamps behind the ball, or so near it they'd show only in part (it shakes a little, too).
+            var middle = new Point(Glass.Width / 2, Glass.Height / 2);
+            Lamps.Covered = p => (p - middle).Length < EightBall.BallRadius + 6;
+            return Ball;
+        }
 
         /// <summary>The case's outline: its rolled top's rounded corners, square at the bottom (for the open and close effects).</summary>
         public static CornerRadius CaseCorners { get { return new CornerRadius(TopCorner, TopCorner, 0, 0); } }
@@ -32,13 +51,24 @@ namespace ReadyLauncher
             Height = CaseHeight;
             UseLayoutRounding = true;
             Children.Add(new CaseFront { BaseHeight = baseHeight });
-            Lamps = new LampPanel(mode, true, true)
+            Lamps = new LampPanel(mode, LampFont.MinRows, true, true)
             {
                 HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
                 Margin = new Thickness(Glass.X, Glass.Y, 0, 0), Width = Glass.Width, Height = Glass.Height,
                 Corners = new CornerRadius(1.5)
             };
             Children.Add(Lamps);
+            // The LED board, a little below the middle of the window, the big lamps either side of it and above it.
+            Board = new LedBoard(() => Lamps.Current)
+            {
+                HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, IsHitTestVisible = false,
+                Margin = new Thickness(Glass.X + (Glass.Width - LedBoard.BoardWidth) / 2, Glass.Y + LedBoard.Bottom - LedBoard.BoardHeight, 0, 0)
+            };
+            Children.Add(Board);
+            // No lamps behind the board, or so near it they'd show only in part.
+            var board = new Rect(Board.Margin.Left - Glass.X, Board.Margin.Top - Glass.Y, LedBoard.BoardWidth, LedBoard.BoardHeight);
+            board.Inflate(4, 4);
+            Lamps.Covered = p => board.Contains(p);
             Children.Add(new GlassSheen { IsHitTestVisible = false });
         }
 
@@ -172,5 +202,170 @@ namespace ReadyLauncher
             br.Freeze();
             return br;
         }
+    }
+
+    /// <summary>
+    /// A small board of tiny red LEDs set into the middle of the monitor's window, flashing like a busy computer: each LED
+    /// on its own, on and off at random moments, only a few lit at a time; quicker and a few more of them with the strip's
+    /// activity. LEDs switch at once (they aren't bulbs), with just a trace of light left as they go out. It only runs
+    /// while it's on screen.
+    /// </summary>
+    internal class LedBoard : FrameworkElement
+    {
+        const int Cols = 13, Rows = 6;
+        const double Pitch = 2.6, Dot = 0.72, Edge = 2.4;
+        public const double BoardWidth = Cols * Pitch + 2 * Edge - (Pitch - 2 * Dot), BoardHeight = Rows * Pitch + 2 * Edge - (Pitch - 2 * Dot);
+        /// <summary>
+        /// Its bottom edge in the monitor's window, from the window's top: low enough to leave two full rows of the big lamps
+        /// above it, clear of it.
+        /// </summary>
+        public const double Bottom = 40.0;
+
+        readonly Func<LampActivity> activity;
+        readonly System.Windows.Threading.DispatcherTimer timer;
+        readonly System.Diagnostics.Stopwatch clock = new System.Diagnostics.Stopwatch();
+        readonly Random rnd = new Random();
+        readonly bool[,] on = new bool[Rows, Cols];
+        readonly double[,] glow = new double[Rows, Cols];
+        readonly double[,] next = new double[Rows, Cols];   // seconds until each LED goes on or off
+        double lastOn, lastOff;   // the pace those were drawn for
+        double last;
+
+        public LedBoard(Func<LampActivity> activity)
+        {
+            this.activity = activity;
+            Width = BoardWidth;
+            Height = BoardHeight;
+            // Already blinking as it would be after a while: about the usual share lit, each with its own time to go.
+            double onFor, offFor;
+            Rates(activity(), out onFor, out offFor);
+            lastOn = onFor;
+            lastOff = offFor;
+            for (int r = 0; r < Rows; r++)
+                for (int c = 0; c < Cols; c++)
+                {
+                    on[r, c] = rnd.NextDouble() < onFor / (onFor + offFor);
+                    next[r, c] = -Math.Log(1 - rnd.NextDouble()) * (on[r, c] ? onFor : offFor);
+                }
+            timer = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(50) };
+            timer.Tick += delegate { Step(); };
+            IsVisibleChanged += delegate { Running(); };
+            Loaded += delegate { Running(); };
+            Unloaded += delegate { timer.Stop(); };
+        }
+
+        /// <summary>
+        /// How long an LED stays on, and off, on average: on for a while (longer than the big lamps around it stay as they
+        /// are) and off for much longer, so only a few are lit at once; fewer and slower when idle (slower still on standby),
+        /// more and quicker on alert.
+        /// </summary>
+        static void Rates(LampActivity a, out double onFor, out double offFor)
+        {
+            double share;   // lit at once
+            if (a == LampActivity.Custom)
+            {
+                var c = LampPanel.CustomLevels() ?? new LampActivityLevels();
+                onFor = 1.7 * LampActivityLevels.Slowness(c.LedSpeed);
+                share = c.LedLamps / 100.0;
+            }
+            else
+            {
+                onFor = a == LampActivity.Standby ? 5.6 : a == LampActivity.Idle ? 2.8 : a == LampActivity.Alert ? 1.0 : 1.7;   // seconds
+                share = a == LampActivity.Standby || a == LampActivity.Idle ? 0.04 : a == LampActivity.Alert ? 0.09 : 0.06;
+            }
+            const double Ever = 1e9;   // (seconds: never, in effect)
+            if (share <= 0) offFor = Ever;   // none: once off, they stay off
+            else if (share >= 1) { onFor = Ever; offFor = 0; }   // all of them
+            else offFor = onFor * (1 - share) / share;
+        }
+
+        void Running()
+        {
+            if (IsVisible && IsLoaded) { if (!timer.IsEnabled) { clock.Restart(); last = 0; timer.Start(); } }
+            else timer.Stop();
+        }
+
+        /// <summary>Test copies: how many times its LEDs have gone on or off.</summary>
+        public long Changes { get; private set; }
+
+        /// <summary>Test copies: how many of its LEDs are lit.</summary>
+        public int LitCount { get { int n = 0; foreach (bool b in on) if (b) n++; return n; } }
+
+        void Step()
+        {
+            double now = clock.Elapsed.TotalSeconds, dt = Math.Min(0.2, now - last);
+            last = now;
+            double onFor, offFor;
+            Rates(activity(), out onFor, out offFor);
+            if (onFor != lastOn || offFor != lastOff)
+            {
+                // A new pace: each LED's time to go is drawn again, as if it had been at this pace all along.
+                lastOn = onFor;
+                lastOff = offFor;
+                for (int r = 0; r < Rows; r++)
+                    for (int c = 0; c < Cols; c++) next[r, c] = -Math.Log(1 - rnd.NextDouble()) * (on[r, c] ? onFor : offFor);
+            }
+            for (int r = 0; r < Rows; r++)
+                for (int c = 0; c < Cols; c++)
+                {
+                    next[r, c] -= dt;
+                    if (next[r, c] > 0) continue;
+                    on[r, c] = !on[r, c];
+                    Changes++;
+                    // how long until it changes again: random, mostly short, now and then much longer
+                    next[r, c] = -Math.Log(1 - rnd.NextDouble()) * (on[r, c] ? onFor : offFor);
+                }
+            for (int r = 0; r < Rows; r++)
+                for (int c = 0; c < Cols; c++)
+                    glow[r, c] = on[r, c] ? 1 : glow[r, c] * Math.Exp(-dt / 0.05);   // on at once; a trace of light going out
+            InvalidateVisual();
+        }
+
+        protected override void OnRender(DrawingContext dc)
+        {
+            double w = BoardWidth, h = BoardHeight;
+            // Set into the window: a black face, with shade along its top inside edge.
+            dc.DrawRectangle(Face, null, new Rect(0, 0, w, h));
+            dc.DrawRectangle(Shade, null, new Rect(0, 0, w, 2));
+            double x0 = Edge + Dot, y0 = Edge + Dot;
+            for (int r = 0; r < Rows; r++)
+                for (int c = 0; c < Cols; c++)
+                {
+                    var p = new Point(x0 + c * Pitch, y0 + r * Pitch);
+                    double g = glow[r, c];
+                    if (g > 0.05) dc.DrawEllipse(GlowBrushes[Math.Min(GlowBrushes.Length - 1, (int)(g * (GlowBrushes.Length - 1) + 0.5))], null, p, Dot * 2.4, Dot * 2.4);
+                }
+            for (int r = 0; r < Rows; r++)
+                for (int c = 0; c < Cols; c++)
+                {
+                    double g = glow[r, c];
+                    dc.DrawEllipse(g > 0.5 ? LitBrush : g > 0.15 ? DimBrush : OffBrush, null, new Point(x0 + c * Pitch, y0 + r * Pitch), Dot, Dot);
+                }
+        }
+
+        static readonly Brush Face = Frozen(new SolidColorBrush(Color.FromRgb(6, 5, 5)));
+        static readonly Brush Shade = Frozen(new LinearGradientBrush(Color.FromArgb(200, 0, 0, 0), Color.FromArgb(0, 0, 0, 0), 90));
+        static readonly Brush OffBrush = Frozen(new SolidColorBrush(Color.FromRgb(46, 10, 9)));
+        static readonly Brush DimBrush = Frozen(new SolidColorBrush(Color.FromRgb(150, 22, 16)));
+        static readonly Brush LitBrush = Frozen(new RadialGradientBrush(Color.FromRgb(255, 150, 120), Color.FromRgb(255, 34, 22)) { GradientOrigin = new Point(0.4, 0.35) });
+        static readonly Brush[] GlowBrushes = MakeGlows();
+
+        static Brush[] MakeGlows()
+        {
+            var list = new Brush[6];
+            for (int k = 0; k < list.Length; k++)
+            {
+                double b = (k + 1) / (double)list.Length;
+                var g = new RadialGradientBrush();
+                g.GradientStops.Add(new GradientStop(Color.FromArgb((byte)(150 * b), 255, 40, 25), 0));
+                g.GradientStops.Add(new GradientStop(Color.FromArgb((byte)(50 * b), 255, 30, 20), 0.5));
+                g.GradientStops.Add(new GradientStop(Color.FromArgb(0, 255, 30, 20), 1));
+                list[k] = Frozen(g);
+            }
+            return list;
+        }
+
+        static Brush Frozen(Brush b) { b.Freeze(); return b; }
+        static Pen FrozenPen(Pen p) { p.Freeze(); return p; }
     }
 }

@@ -165,7 +165,7 @@ namespace ReadyLauncher
                 Item("Notes on the right", () => SetNotesPlacement(NotesPlacement.Right), S.NotesPos == NotesPlacement.Right, null),
                 Item("No notes window", () => SetNotesPlacement(NotesPlacement.Off), S.NotesPos == NotesPlacement.Off, null),
                 new Separator(),
-                Item("Notes settings...", () => app.OpenSettings(3), false, "\uE713")
+                Item("Notes settings...", () => app.OpenSettings(SettingsWindow.NotesTab), false, "\uE713")
             };
         }
         List<object> ArrangeMenuItems()

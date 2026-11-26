@@ -139,14 +139,14 @@ namespace ReadyLauncher
             // Right-clicking them changes their activity; dragging them moves the launcher, like the strip's empty space.
             if (lampsBehind)
             {
-                var behind = new LampPanel(S.LampMode, true) { Corners = inner };
+                var behind = new LampPanel(S.LampMode, S.LampRows, true) { Corners = inner, Palette = LampPalette.From(S) };
                 HookLampStrip(behind, true);
                 grid.Children.Add(behind);
             }
             if (lampsUnder)
             {
                 var withLamps = new DockPanel { LastChildFill = true };
-                var lamps = new LampPanel(S.LampMode) { Corners = new CornerRadius(0, 0, inner.BottomRight, inner.BottomLeft) };
+                var lamps = new LampPanel(S.LampMode, S.LampRows) { Corners = new CornerRadius(0, 0, inner.BottomRight, inner.BottomLeft), Palette = LampPalette.From(S) };
                 HookLampStrip(lamps, true);
                 DockPanel.SetDock(lamps, Dock.Bottom);
                 withLamps.Children.Add(lamps);
@@ -251,7 +251,7 @@ namespace ReadyLauncher
                 menu.Items.Add(Item("Most used apps", () => SetDockSource(DockSource.Frequent), S.Dock == DockSource.Frequent, ""));
                 menu.Items.Add(Item("Recently installed apps", () => SetDockSource(DockSource.RecentlyInstalled), S.Dock == DockSource.RecentlyInstalled, ""));
                 menu.Items.Add(new Separator());
-                menu.Items.Add(Item("Quick launch settings...", () => app.OpenSettings(2), false, ""));
+                menu.Items.Add(Item("Quick launch settings...", () => app.OpenSettings(SettingsWindow.QuickLaunchTab), false, ""));
                 menu.IsOpen = true;
             };
             // Right-click: the apps hidden from the strip, to bring one back.

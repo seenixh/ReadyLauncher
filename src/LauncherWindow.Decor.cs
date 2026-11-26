@@ -436,6 +436,7 @@ namespace ReadyLauncher
                     else if (action.StartsWith("docktest:")) TestDock(action.Substring(9));
                     else if (action.StartsWith("lamptest:")) TestLamps(action.Substring(9));
                     else if (action.StartsWith("menushot:")) SaveMenuPictures(action.Substring(9));
+                    else if (action.StartsWith("lampmenushot:")) SaveLampMenuPictures(action.Substring(13));
                     else if (action.StartsWith("volumeright:") || action == "volumeslider")
                     {
                         // Test copies only: a right-click on volume button n, or a press and let-go on the slider, a few

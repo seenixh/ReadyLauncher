@@ -167,11 +167,17 @@ namespace ReadyLauncher
                 b.Freeze();
                 rd["T." + Keys[i]] = b;
             }
-            if (menuStyles == null) menuStyles = (ResourceDictionary)XamlReader.Parse(Head + MenuXaml + Tail);
+            if (menuStyles == null) menuStyles = (ResourceDictionary)XamlReader.Parse(Head + SliderXaml + MenuXaml + Tail);
             rd.MergedDictionaries.Add(menuStyles);
             menu.Resources = rd;
             menu.Style = (Style)menuStyles[typeof(ContextMenu)];
             return menu;
+        }
+
+        /// <summary>A color of the menus' theme as it is now: "Border", "Accent" and so on.</summary>
+        public static Color MenuColor(string key)
+        {
+            return (Color)ColorConverter.ConvertFromString(Palettes[PaletteFor(MenuMode)][Array.IndexOf(Keys, key)]);
         }
 
         /// <summary>
@@ -270,8 +276,79 @@ namespace ReadyLauncher
 
 ";
 
+        // Sliders: an accent track up to a round thumb (in Settings, and in right-click menus).
+        const string SliderXaml = @"
+  <Style x:Key='SliderPart' TargetType='{x:Type RepeatButton}'>
+    <Setter Property='OverridesDefaultStyle' Value='True'/>
+    <Setter Property='Focusable' Value='False'/>
+    <Setter Property='IsTabStop' Value='False'/>
+    <Setter Property='Template'>
+      <Setter.Value>
+        <ControlTemplate TargetType='{x:Type RepeatButton}'>
+          <Border Background='Transparent'>
+            <Border Height='4' CornerRadius='2' VerticalAlignment='Center' Background='{TemplateBinding Background}'/>
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key='SliderThumb' TargetType='{x:Type Thumb}'>
+    <Setter Property='OverridesDefaultStyle' Value='True'/>
+    <Setter Property='Focusable' Value='False'/>
+    <Setter Property='Template'>
+      <Setter.Value>
+        <ControlTemplate TargetType='{x:Type Thumb}'>
+          <Grid Width='18' Height='18'>
+            <Ellipse Fill='{DynamicResource T.Control}' Stroke='{DynamicResource T.Border}' StrokeThickness='1'/>
+            <Ellipse x:Name='dot' Width='10' Height='10' Fill='{DynamicResource T.Accent}'/>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property='IsMouseOver' Value='True'>
+              <Setter TargetName='dot' Property='Width' Value='12'/>
+              <Setter TargetName='dot' Property='Height' Value='12'/>
+            </Trigger>
+            <Trigger Property='IsDragging' Value='True'>
+              <Setter TargetName='dot' Property='Width' Value='8'/>
+              <Setter TargetName='dot' Property='Height' Value='8'/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key='SliderLook' TargetType='{x:Type Slider}'>
+    <Setter Property='Template'>
+      <Setter.Value>
+        <ControlTemplate TargetType='{x:Type Slider}'>
+          <Grid MinHeight='22' Background='Transparent'>
+            <Track x:Name='PART_Track'>
+              <Track.DecreaseRepeatButton>
+                <RepeatButton Style='{StaticResource SliderPart}' Background='{DynamicResource T.Accent}' Command='{x:Static Slider.DecreaseLarge}'/>
+              </Track.DecreaseRepeatButton>
+              <Track.Thumb><Thumb Style='{StaticResource SliderThumb}'/></Track.Thumb>
+              <Track.IncreaseRepeatButton>
+                <RepeatButton Style='{StaticResource SliderPart}' Background='{DynamicResource T.Track}' Command='{x:Static Slider.IncreaseLarge}'/>
+              </Track.IncreaseRepeatButton>
+            </Track>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property='IsEnabled' Value='False'><Setter Property='Opacity' Value='0.45'/></Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+";
+
         // Right-click menus: the menu, its items (with icons, ticks, shortcut keys and submenus) and separators.
         const string MenuXaml = @"
+  <Style TargetType='{x:Type Slider}' BasedOn='{StaticResource SliderLook}'>
+    <Setter Property='Focusable' Value='False'/>
+    <Setter Property='IsMoveToPointEnabled' Value='True'/>
+  </Style>
+
   <Style TargetType='{x:Type ContextMenu}'>
     <Setter Property='OverridesDefaultStyle' Value='True'/>
     <Setter Property='SnapsToDevicePixels' Value='True'/>
@@ -620,68 +697,9 @@ namespace ReadyLauncher
 
 
 " + ScrollXaml + @"
-  <Style x:Key='SliderPart' TargetType='{x:Type RepeatButton}'>
-    <Setter Property='OverridesDefaultStyle' Value='True'/>
-    <Setter Property='Focusable' Value='False'/>
-    <Setter Property='IsTabStop' Value='False'/>
-    <Setter Property='Template'>
-      <Setter.Value>
-        <ControlTemplate TargetType='{x:Type RepeatButton}'>
-          <Border Background='Transparent'>
-            <Border Height='4' CornerRadius='2' VerticalAlignment='Center' Background='{TemplateBinding Background}'/>
-          </Border>
-        </ControlTemplate>
-      </Setter.Value>
-    </Setter>
-  </Style>
-
-  <Style x:Key='SliderThumb' TargetType='{x:Type Thumb}'>
-    <Setter Property='OverridesDefaultStyle' Value='True'/>
-    <Setter Property='Focusable' Value='False'/>
-    <Setter Property='Template'>
-      <Setter.Value>
-        <ControlTemplate TargetType='{x:Type Thumb}'>
-          <Grid Width='18' Height='18'>
-            <Ellipse Fill='{DynamicResource T.Control}' Stroke='{DynamicResource T.Border}' StrokeThickness='1'/>
-            <Ellipse x:Name='dot' Width='10' Height='10' Fill='{DynamicResource T.Accent}'/>
-          </Grid>
-          <ControlTemplate.Triggers>
-            <Trigger Property='IsMouseOver' Value='True'>
-              <Setter TargetName='dot' Property='Width' Value='12'/>
-              <Setter TargetName='dot' Property='Height' Value='12'/>
-            </Trigger>
-            <Trigger Property='IsDragging' Value='True'>
-              <Setter TargetName='dot' Property='Width' Value='8'/>
-              <Setter TargetName='dot' Property='Height' Value='8'/>
-            </Trigger>
-          </ControlTemplate.Triggers>
-        </ControlTemplate>
-      </Setter.Value>
-    </Setter>
-  </Style>
-
-  <Style TargetType='{x:Type Slider}'>
+" + SliderXaml + @"
+  <Style TargetType='{x:Type Slider}' BasedOn='{StaticResource SliderLook}'>
     <Setter Property='FocusVisualStyle' Value='{StaticResource FocusRect}'/>
-    <Setter Property='Template'>
-      <Setter.Value>
-        <ControlTemplate TargetType='{x:Type Slider}'>
-          <Grid MinHeight='22' Background='Transparent'>
-            <Track x:Name='PART_Track'>
-              <Track.DecreaseRepeatButton>
-                <RepeatButton Style='{StaticResource SliderPart}' Background='{DynamicResource T.Accent}' Command='{x:Static Slider.DecreaseLarge}'/>
-              </Track.DecreaseRepeatButton>
-              <Track.Thumb><Thumb Style='{StaticResource SliderThumb}'/></Track.Thumb>
-              <Track.IncreaseRepeatButton>
-                <RepeatButton Style='{StaticResource SliderPart}' Background='{DynamicResource T.Track}' Command='{x:Static Slider.IncreaseLarge}'/>
-              </Track.IncreaseRepeatButton>
-            </Track>
-          </Grid>
-          <ControlTemplate.Triggers>
-            <Trigger Property='IsEnabled' Value='False'><Setter Property='Opacity' Value='0.45'/></Trigger>
-          </ControlTemplate.Triggers>
-        </ControlTemplate>
-      </Setter.Value>
-    </Setter>
   </Style>
 
   <Style TargetType='{x:Type Hyperlink}'>

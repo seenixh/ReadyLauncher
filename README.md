@@ -1,10 +1,29 @@
 # Ready Launcher
 
-An always-on-top app launcher window for Windows 11. Nothing to install: it is built with the
-C# compiler and WPF that ship with Windows (.NET Framework 4.8).
+An always-on-top app launcher window for Windows 11. It is built with the C# compiler and WPF that
+ship with Windows (.NET Framework 4.8), so there's nothing else to install.
 
-**Download:** get `ReadyLauncher.exe` from the [latest release](https://github.com/seenixh/ReadyLauncher/releases/latest)
-and double-click it, or build it yourself as described below.
+## Download
+
+Get it from the [latest release](https://github.com/seenixh/ReadyLauncher/releases/latest), in one of two ways:
+
+- **Installer (recommended):** `ReadyLauncher-<version>-Setup.exe` installs Ready Launcher for your Windows
+  account (no administrator needed) in `%LOCALAPPDATA%\Programs\Ready Launcher`, adds it to the Start menu (and
+  the desktop, if you like), and can be uninstalled from Windows Settings → Apps. Your icons, notes and settings
+  are kept in `%APPDATA%\ReadyLauncher`, and stay there if you uninstall it.
+- **Portable:** `ReadyLauncher-<version>-Portable.zip`. Unzip it anywhere (a folder, a USB stick) and run
+  `ReadyLauncher.exe`; nothing to install. Because `portable.txt` is beside it, your icons, notes and settings
+  are kept in the `Data` folder next to it (and automatic backups in `Backups`), so the whole folder can move to
+  another PC. Delete `portable.txt` to keep them in `%APPDATA%\ReadyLauncher` instead.
+
+The release also has `ReadyLauncher.exe` on its own: that's what **Settings → Check for updates** downloads
+(it swaps the new version in wherever yours is, installed or portable). You can run it on its own too; it then
+keeps its setup in `%APPDATA%\ReadyLauncher`, like the installed version.
+
+Windows may say it protected your PC, because the app isn't signed by a publisher. Click **More info**, then
+**Run anyway**. Ready Launcher runs one copy at a time, so close one copy before starting another.
+
+Or build it yourself, as described below.
 
 ### Demo video
 
@@ -38,6 +57,14 @@ quick launch strip's icons.
 2. Run `bin\ReadyLauncher.exe`. Right-click its taskbar button and choose **Pin to taskbar** if you
    want a launcher icon; clicking it brings the launcher window to the front.
 
+### Making a release
+
+Run `release.ps1` (it needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)). It builds the app and writes the
+three files for a GitHub release to `dist\<version>\`: `ReadyLauncher-<version>-Setup.exe` (from
+`installer\ReadyLauncher.iss`), `ReadyLauncher-<version>-Portable.zip` (the exe with `installer\portable.txt`) and
+`ReadyLauncher.exe`. Attach all three to a release tagged `v<version>`. Keep `ReadyLauncher.exe` among them, with
+that name: **Check for updates** in every version so far downloads the release's `.exe` called that.
+
 ## Using it
 
 | To do this | Do this |
@@ -68,7 +95,7 @@ quick launch strip's icons.
 | Color the buttons, volume control, icon names or notes tabs | Settings → Appearance → *Colors of the launcher's parts*: one color each, or the same color for all four. |
 | Dress everything up at once | Settings → Appearance → *Theme*: a background picture and matching colors for every window and button. *Christmas Lights* is a snowy night with a house covered in big colored bulbs. *None* puts your own look back. |
 | Save your look as a theme, or share one | Settings → Appearance → *Save as theme...* keeps your pictures, colors, see-through settings, animation and lamp strip under a name. *Export...* saves the chosen theme to a `.rltheme` file; *Import...* adds one someone shared. |
-| Add blinking computer lamps | Settings → Appearance → *Lamp strip*: inside the launcher (top or bottom), floating above or below it, along the bottom of the quick launch strip, or behind its icons; *Lamp activity* sets idle, computing, alert, or *Randomize* (switches between them on its own every 20 to 60 seconds). Right-click the strip to change its activity right there. *Monitor* stands a WOPR computer cabinet, with a few lamps blinking in its window, at the left or right end of a strip above or below the launcher. *Lamp text* spells your own words in lamps, scrolling across or flashing. *Reminders* flash messages from dates and times you set until you right-click the strip and dismiss them; add and delete them in a list. |
+| Add blinking computer lamps | Settings → *Lamp strip* → *Position*: inside the launcher (top or bottom), floating above or below it, along the bottom of the quick launch strip, or behind its icons; *Lamp activity* sets standby (the slowest), idle, computing, alert, *Randomize* (switches between them on its own every 20 to 60 seconds), or *Custom*: your own, with sliders for how quick the strip's lamps, the monitor's lamps and its small red lamps are and how many are lit, and save and delete ones you like (right-click the strip → *Activity* has the same sliders, and the lamps change as you move them). *Lamp colors* can be red and amber, or one or more colors you pick (from a list, or any color from a color wheel), in pastel too. Right-click the strip for a menu with every one of these settings, each showing what it's set to. *Monitor* stands a WOPR computer cabinet, with a few lamps blinking in its window, at the left or right end of a strip above or below the launcher. Tick *Magic 8 Ball* → *In the monitor* (or in the strip's menu, just above *Random numbers*) and a black pool ball with its 8 sits in the monitor's window: ask it a yes-or-no question and click it, and it shakes and spins, then one of its 20 answers, in capitals, comes out of the strip's blinking lamps; with *Instant Response* the answer is there at once and stays until you click the ball again. Unticking the ball takes away a monitor it brought. *Random numbers*: right-click the strip → *Pick random numbers* and new numbers show on the lamps at once, picked with a pattern like `xx/0-99,xxx/0-999,xxxx/0-9999` (an x for each digit, then the lowest and highest number; commas between groups), which picks numbers like 24 432 8476; save patterns under a name and each gets a button in the strip's menu that picks numbers with it in one click (right-click a button to delete it), and *Picked numbers* lists the numbers picked with the date and time. *Lamp text* spells your own words in lamps, scrolling across (at the speed you choose), flashing, staying still, or fading in out of the blinking lamps and back; make the strip 7 to 10 lamps high for upper and lowercase text. *Reminders* flash messages from dates and times you set until you right-click the strip and dismiss them; add, change and delete them from the strip's menu, or in a list in Settings. |
 | Take notes | Click the notes button at the top of the launcher and pick left or right. The notes window opens and closes with the launcher and saves as you type. Its save button writes all the notes (every tab) to a text file. |
 | Notes tabs | Click **+** for a new tab (type its name, Enter). Double-click a tab to rename it; right-click it to move it left or right, give it its own **color** (shown as a dot on the tab), or delete it. Right after deleting, **Undo** under the tabs brings it back with its notes (for about 12 seconds). |
 | Find in notes | **Ctrl+F** opens a find box above the text: it searches every tab as you type, jumping to other tabs as needed. Enter / F3 for the next match, Shift+Enter / Shift+F3 for the previous one, Esc to close. |
@@ -86,7 +113,7 @@ round button at the start of the strip.
 **Settings** (gear icon or tray menu) stays in front of the launcher while it's open, and closes when
 the launcher closes (changes you haven't applied are dropped, as with Cancel). Rest the mouse on any
 setting's title, option or button for a short description of what it does (each sensor in the list says
-what it measures). It has six tabs:
+what it measures). It has seven tabs:
 
 - **General**: open shortcut, launcher size (small, medium, large or a custom width x height in
   pixels), open/close animation (fade, slide up, slide down, zoom, pop, blur, TV static, flip, digital rain, beam, glass, Randomize for a different one each time it opens, or none), its speed (25% to 300%) and which windows beside the launcher animate with it (all of them, or any of: notes, sensor bar, detached strip, outside volume control), volume
@@ -124,19 +151,54 @@ what it measures). It has six tabs:
   (its text, mute button and slider), the names under icons, and the notes window's title, tabs and buttons. **Auto**
   keeps each one readable on what's behind it. Tick *Use the same color for all four* to give them one shared color
   instead; the four separate colors are kept for when you untick it.
-  **Lamp strip**: a strip of blinking red and amber lamps, like the front of an early-1980s mainframe. It can sit
+- **Lamp strip**: a strip of blinking lamps, like the front of an early-1980s mainframe. *Position*: it can sit
   inside the launcher (along its top edge with the buttons below it, where it also moves the launcher when dragged, or
   along the bottom), sit outside it right against its top or bottom
   edge (a floating quick launch strip or the sensor bar moves out to make room), run along the bottom of the
-  quick launch strip, or fill the strip behind its icons. *Lamp activity* sets how busy it looks: idle, computing, or
-  alert (busier, with a band of light sweeping along), or randomize, which switches between the three on its own
-  every 20 to 60 seconds. Right-click the strip to change its activity right there. It only runs while the launcher
-  is showing. **Monitor**: with the strip above or below the launcher, a computer cabinet lettered WOPR can stand at
+  quick launch strip, or fill the strip behind its icons. *Lamp activity* sets how busy it looks: standby (the
+  slowest, at half the pace of idle), idle, computing, or alert (busier, with a band of light sweeping along), or
+  randomize, which switches between the four on its own
+  every 20 to 60 seconds, or custom: your own, set with *Custom activity*'s sliders (for the strip's lamps, the
+  monitor's lamps and its small red lamps, a speed from 1, slower than standby, to 20, four times as quick as computing,
+  and how many are lit, 0 to 100%); *Saved activities* keeps ones you like under a name, to choose again or delete. *Lamp colors* is red and amber, or your own: tick one or more of pink,
+  red, orange, amber, gold, yellow, green, cyan, blue, purple, grey and white, and up to 6 *Custom colors*, any color
+  you like from a color wheel (change or remove each one later). Several colors are mixed while blinking, and one to a letter in text. *Pastel* makes any of
+  them softer. It only runs while the launcher is showing. **Right-click the strip** for a menu with all of its
+  settings, in groups (the strip, its text, its reminders), each showing what it's set to now; from there you can also
+  move it, take it away, and add, change or delete reminders. **Monitor**: with the strip above or below the launcher, a computer cabinet lettered WOPR can stand at
   its left or right end, rising above the strip (below the launcher, it stands over the launcher's bottom corner). Its
-  dark window has lamps too, spaced well apart and fewer of them lit, doing whatever the strip is doing. Right-click
-  the strip or the monitor to move it to the other end or take it away. **Lamp text**: the strip can spell out text you
-  type (*Text to show*), in lamps six high (the strip's full height), scrolling in from the right or flashing as many words as fit at once;
-  right-click the strip to switch it or change the text. Tick *Keep the lamps blinking on either side of the text* and
+  dark window has lamps too, spaced well apart and fewer of them lit, doing whatever the strip is doing, and in the
+  middle a small board of tiny red LEDs flashes away, busier or calmer with the strip's activity. Right-click
+  the strip or the monitor to move it to the other end or take it away. **Magic 8 Ball**: tick *In the monitor (click it
+  for an answer)* and a black pool ball with its white 8 sits in the monitor's window. Ask it a yes-or-no question and
+  click it: it shakes and spins for a few seconds, the 8 sliding round as it turns, and stops with its blue answer window
+  facing you; then one of its 20 answers, in capitals, slowly comes out of the strip's blinking lamps, stays a while and
+  goes back to blinking, and the strip carries on with what it was showing (an answer too long for the strip comes in two
+  parts). Tick *Instant Response* and the answer is on the strip at once when the ball stops, and stays there until
+  you click the ball again (it goes as the ball starts to spin, and a new one comes when it stops). It needs the
+  monitor, so ticking it puts one at the right end if there isn't one, and unticking it takes that one away again, so
+  the strip is back as it was. In the strip's right-click menu, *Magic 8 Ball* sits just above *Random numbers*.
+  **Random numbers**: right-click the strip and choose *Pick random numbers*, and new random numbers show on the
+  lamps at once, stay for 12 seconds and go back to blinking. *Random numbers* sets the pattern they're picked
+  with: groups separated by commas, each like `xxx/0-999`, an x for each digit (a smaller number gets zeros in front),
+  a slash, and the lowest and highest number (leave those out for any number with that many digits). So
+  `xx/0-99,xxx/0-999,xxxx/0-9999` picks numbers like 24 432 8476, and `x/1-6,x/1-6` rolls two dice; up to 20 groups of
+  up to 9 digits. Under the box is an example of what it picks, or what's wrong with the pattern. *Save...* keeps a
+  pattern under a name; choose one in *Saved patterns* to use it, or delete it (you're asked first). In the strip's
+  menu, each saved pattern is a button under *Random numbers*: click it to pick numbers with that pattern (the menu
+  stays open, so you can click again), point at it to see its pattern and how many times it's been clicked, or
+  right-click it and choose *Delete* (you're asked first). *Picked numbers* lists the last 100 picks, newest first,
+  with the pattern and the date and time; *Clear the list...* empties it. *Number pattern* types or saves a pattern. **Lamp text**: the strip can spell out text you
+  type (*Text to show*), as tall as the strip, scrolling in from the right, flashing as many words as fit at once, staying still
+  (if it doesn't all fit, it changes to the next words every 4 seconds), or fading in out of the blinking lamps: a few
+  seconds of blinking, then the lamps slowly settle into the text a few at a time, hold it for 5 seconds, and slowly go
+  back to blinking, over and over; right-click the strip to switch it or change
+  the text. *Lamp strip height* goes from 6 to 10 lamps: at 6, text is all in capitals; higher, it's in upper and lower
+  case the way you type it (behind the quick launch strip's icons, where the lamps fill the space there is, it only
+  changes the text). Capitals fill the strip's height; tick *Leave room for the tails of g, j, p, q and y* for smaller
+  letters whose tails hang below the line, and choose how many lamps the tails get (*Lamps for tails*, up to 4,
+  depending on the height). *Text scroll speed* goes from 25%
+  to 300% of the usual speed. Tick *Keep the lamps blinking on either side of the text* and
   the rest of the strip goes on blinking right up to the edges of the text (and reminders) instead of going dark. **Reminders**: add as many as you like, each with a date, a
   time and a message, and delete them from the list; from its time on, the strip flashes a reminder (instead of its
   own text or blinking) until you right-click the strip and dismiss it, and several due at once flash in turn. If a
@@ -220,7 +282,7 @@ Official downloads only:
 **Always download apps only from their official sites.** Copies on other download sites can be out of
 date, or bundled with adware or malware.
 
-Your icons and settings are saved in `%APPDATA%\ReadyLauncher\launcher.xml`.
+Your icons and settings are saved in `%APPDATA%\ReadyLauncher\launcher.xml` (a portable copy: `Data\launcher.xml` beside it).
 
 ### Backup (export and import)
 
@@ -232,7 +294,7 @@ saved as `%APPDATA%\ReadyLauncher\launcher.before-import.xml`; import that file 
 
 **Automatic backups** (off unless you switch them on): *Back up automatically every N days* (1 to 365)
 saves the same kind of backup file into a folder you choose on a drive of this PC (not a network
-drive; `Documents\Ready Launcher backups` to start with). Each backup is a new file named with the date
+drive; `Documents\Ready Launcher backups` to start with, or the `Backups` folder beside a portable copy). Each backup is a new file named with the date
 and time it was made, like `Launcher backup 2026-11-16 14-05-32.xml`; older ones are kept. A backup
 that came due while the PC was off is saved shortly after the launcher starts. *Back up now* saves one
 right away. If the folder can't be reached (for example a USB drive that isn't plugged in), the tray
@@ -240,6 +302,8 @@ icon says so.
 
 ## Source layout
 
+- `release.ps1`: the release files; `installer/ReadyLauncher.iss`: the installer (Inno Setup); `installer/portable.txt`:
+  the file that makes the portable download portable (the data folder is chosen in `src/Models.cs`)
 - `src/Program.cs`: startup, single instance, tray icon, global hotkey, start-with-Windows; `src/SessionEndGuard.cs`:
   staying open when a sign-out or restart is canceled (WPF on its own quits as soon as Windows asks)
 - `src/LauncherWindow*.cs`: the window (layout, drag & drop, folders, menus, quick-launch strip,

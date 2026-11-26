@@ -20,9 +20,13 @@ namespace ReadyLauncher
         readonly TextBox hex;
         bool updating;
 
+        /// <summary>Test copies only: the color to pick instead of showing the wheel ("": as if canceled).</summary>
+        internal static string TestPick;
+
         /// <summary>Returns the chosen color as #RRGGBB, or null if canceled.</summary>
         public static string Pick(Window owner, string current)
         {
+            if (Program.TestMode && TestPick != null) return TestPick.Length == 0 ? null : TestPick;
             var dlg = new ColorPickerDialog(current);
             if (owner != null && owner.IsVisible) dlg.Owner = owner; else dlg.WindowStartupLocation = WindowStartupLocation.CenterScreen;
             return dlg.ShowDialog() == true ? dlg.hex.Text.Trim().ToUpperInvariant() : null;

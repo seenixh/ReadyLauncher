@@ -1,0 +1,20 @@
+Ready Launcher - portable copy
+
+While this file is in the same folder as ReadyLauncher.exe, Ready Launcher keeps your icons, notes
+and settings in the Data folder beside it (it makes the folder the first time it starts). So the
+whole folder can go on a USB stick or to another PC, and nothing is kept in %APPDATA%.
+
+To keep them in %APPDATA%\ReadyLauncher instead, as the installed version does, close Ready
+Launcher and delete this file. (Copy what's in the Data folder to %APPDATA%\ReadyLauncher first if
+you want to keep your setup.)
+
+Automatic backups (Settings > General > Backup) go to the Backups folder beside it, unless you
+choose another folder.
+
+Settings > Check for updates swaps in the new version right here, and this file stays.
+
+"Start with Windows" (in Settings) starts this copy from where it is now. If you move the folder,
+untick it and tick it again.
+
+Press Ctrl + Alt + L to open or hide the launcher.
+https://github.com/seenixh/ReadyLauncher

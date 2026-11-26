@@ -12,9 +12,11 @@ namespace ReadyLauncher
     public enum DockSource { Frequent, RecentlyInstalled, Hidden }
     public enum DockPosition { Bottom, Top, Left, Right }
     public enum LampPanelPlace { Off, Top, Bottom, AboveLauncher, BelowLauncher, UnderStrip, StripBackground }   // the blinking lamp strip: saved by name; Settings lists them in this order
-    public enum LampActivity { Idle, Computing, Alert, Random }   // Random: switches between the other three now and then
+    public enum LampActivity { Standby, Idle, Computing, Alert, Random, Custom }   // Random: switches between the first four now and then; Custom: your own (LampActivityLevels)
+    public enum LampHue { Pink, Red, Orange, Amber, Gold, Yellow, Green, Cyan, Blue, Purple, Grey, White }   // lamp colors to pick from: saved by name; Settings lists them in this order
+    public enum LampColors { AsIs, RedAmber, RedGreen, ChristmasLights, Picked }   // the lamps' colors (AsIs: only in looks from before 1.93, which leave them alone; RedGreen and ChristmasLights: only in settings and looks from before 1.97)
     public enum LampMonitorPlace { None, Left, Right }   // a computer cabinet at one end of a lamp strip outside the launcher
-    public enum LampTextEffect { None, Scroll, Flash }   // words spelled out in lamps on the strip
+    public enum LampTextEffect { None, Scroll, Flash, Still, Emerge }   // words spelled out in lamps on the strip: saved by name; Settings lists them in this order
     public enum DockAlignment { Start, Center, End }
     public enum VolumePlacement { Off, InsideLeft, InsideRight, OutsideLeft, OutsideRight }
     public enum IconSizeMode { ExtraSmall, Small, Medium, Large, Tiny }   // Tiny was added later, so it comes last here
@@ -149,6 +151,12 @@ namespace ReadyLauncher
         public LampPanelPlace LampPanel;
         public LampActivity LampMode = LampActivity.Computing;
         public LampMonitorPlace LampMonitor;
+        public int LampRows;   // 6 to 10 lamps high; 0 (a look from before 1.88) leaves the height as you have it
+        public LampColors LampColors;
+        [XmlArrayItem("Color")] public List<LampHue> LampPicked;
+        [XmlArrayItem("Color")] public List<LampCustomColor> LampCustom;   // (none in a look from before 1.96)
+        public LampActivityLevels LampCustomActivity;   // (none in a look from before 2.1: yours stays as it is)
+        public bool LampPastel;
     }
 
     /// <summary>A theme you saved from your own look (Settings > Appearance > Save as theme).</summary>
@@ -162,6 +170,133 @@ namespace ReadyLauncher
     /// An app taken off the quick launch strip (right-click it there). It's matched by its path or its name, because
     /// the strip lists each app once by name and the same app can come from a different shortcut.
     /// </summary>
+    /// <summary>A pattern for random numbers on the lamp strip (see <see cref="NumberPattern"/>), saved under a name.</summary>
+    public class LampNumberPattern
+    {
+        [XmlAttribute] public string Name = "";
+        [XmlAttribute] public string Pattern = "";
+        [XmlAttribute] public int Clicks;   // how many times its button in the strip's menu has been clicked
+    }
+
+    /// <summary>Random numbers picked on the lamp strip: the numbers, the pattern they were picked with, and when.</summary>
+    public class LampNumberPick
+    {
+        public const int MaxKept = 100;   // the newest ones; older ones come off the list
+        [XmlAttribute] public DateTime When;
+        [XmlAttribute] public string Numbers = "";
+        [XmlAttribute] public string Pattern = "";
+    }
+
+    /// <summary>
+    /// A lamp activity of your own (<see cref="LampActivity.Custom"/>): how quick, and how many lit, for the strip's lamps,
+    /// the monitor's lamps and the monitor's small red lamps. Speed goes from 1 to 20, 10 being as quick as Computing; lamps
+    /// is the share of them lit, 0 to 100%. Saved ones have a name.
+    /// </summary>
+    public class LampActivityLevels
+    {
+        public const int MinSpeed = 1, MaxSpeed = 20, UsualSpeed = 10, MaxSaved = 30;
+        [XmlAttribute] public string Name = "";
+        [XmlAttribute] public int StripSpeed = UsualSpeed;
+        [XmlAttribute] public int StripLamps = 50;
+        [XmlAttribute] public int MonitorSpeed = UsualSpeed;
+        [XmlAttribute] public int MonitorLamps = 25;
+        [XmlAttribute] public int LedSpeed = UsualSpeed;
+        [XmlAttribute] public int LedLamps = 6;
+
+        /// <summary>
+        /// How many times slower than Computing a speed is: 1 at 10; 8 at 1 (slower than Standby, which is about 2); a
+        /// quarter at 20 (four times as quick).
+        /// </summary>
+        public static double Slowness(int speed)
+        {
+            speed = Math.Max(MinSpeed, Math.Min(MaxSpeed, speed));
+            return speed <= UsualSpeed ? Math.Pow(2, (UsualSpeed - speed) / 3.0) : Math.Pow(2, (UsualSpeed - speed) / 5.0);
+        }
+
+        public LampActivityLevels Copy(string name)
+        {
+            var c = (LampActivityLevels)MemberwiseClone();
+            c.Name = name ?? "";
+            return c;
+        }
+
+        /// <summary>The same speeds and shares (the name aside).</summary>
+        public bool SameAs(LampActivityLevels o)
+        {
+            return o != null && StripSpeed == o.StripSpeed && StripLamps == o.StripLamps && MonitorSpeed == o.MonitorSpeed && MonitorLamps == o.MonitorLamps
+                && LedSpeed == o.LedSpeed && LedLamps == o.LedLamps;
+        }
+
+        /// <summary>Speeds and shares kept within their ranges.</summary>
+        public LampActivityLevels Tidy()
+        {
+            Func<int, int> speed = v => Math.Max(MinSpeed, Math.Min(MaxSpeed, v));
+            Func<int, int> share = v => Math.Max(0, Math.Min(100, v));
+            StripSpeed = speed(StripSpeed);
+            MonitorSpeed = speed(MonitorSpeed);
+            LedSpeed = speed(LedSpeed);
+            StripLamps = share(StripLamps);
+            MonitorLamps = share(MonitorLamps);
+            LedLamps = share(LedLamps);
+            Name = (Name ?? "").Trim();
+            return this;
+        }
+
+        /// <summary>In words: "Lamp strip: speed 10, 50% lit. Monitor lamps: ... Red lamps: ..."</summary>
+        public string Summary()
+        {
+            return "Lamp strip: speed " + StripSpeed + ", " + StripLamps + "% lit. Monitor lamps: speed " + MonitorSpeed + ", " + MonitorLamps
+                + "% lit. Red lamps: speed " + LedSpeed + ", " + LedLamps + "% lit.";
+        }
+
+        /// <summary>Saved ones with a name, each name once, no more than 30.</summary>
+        public static List<LampActivityLevels> TidyList(IEnumerable<LampActivityLevels> saved)
+        {
+            var list = new List<LampActivityLevels>();
+            foreach (var a in saved ?? new LampActivityLevels[0])
+            {
+                if (a == null || string.IsNullOrWhiteSpace(a.Name)) continue;
+                var t = a.Copy(a.Name).Tidy();
+                if (list.Any(o => string.Equals(o.Name, t.Name, StringComparison.CurrentCultureIgnoreCase))) continue;
+                list.Add(t);
+            }
+            return list.Take(MaxSaved).ToList();
+        }
+
+        /// <summary>
+        /// The saved ones with <paramref name="levels"/> saved under <paramref name="name"/>: it takes the place of one with
+        /// that name or with the same settings (so saving those again renames them). No name: the next "Activity N".
+        /// </summary>
+        public static List<LampActivityLevels> Save(List<LampActivityLevels> saved, string name, LampActivityLevels levels)
+        {
+            name = (name ?? "").Trim();
+            if (name.Length == 0) name = NextName(saved);
+            Func<LampActivityLevels, bool> same = a => string.Equals(a.Name, name, StringComparison.CurrentCultureIgnoreCase) || a.SameAs(levels);
+            var list = saved.Where(a => !same(a)).Select(a => a.Copy(a.Name)).ToList();
+            int at = saved.FindIndex(a => same(a));
+            if (at >= 0) at -= saved.Take(at).Count(a => same(a));
+            list.Insert(at < 0 ? list.Count : at, levels.Copy(name).Tidy());
+            return TidyList(list);
+        }
+
+        /// <summary>A name not used yet: Activity 1, Activity 2, ...</summary>
+        public static string NextName(List<LampActivityLevels> saved)
+        {
+            for (int n = 1; ; n++)
+            {
+                string name = "Activity " + n;
+                if (!saved.Any(a => string.Equals(a.Name, name, StringComparison.CurrentCultureIgnoreCase))) return name;
+            }
+        }
+    }
+
+    /// <summary>A lamp color chosen with the color wheel ("#RRGGBB"), kept even while it isn't ticked.</summary>
+    public class LampCustomColor
+    {
+        [XmlAttribute] public string Color = "";
+        [XmlAttribute] public bool On;
+    }
+
     /// <summary>A reminder on the lamp strip: from <see cref="At"/> on, the strip flashes <see cref="Text"/> until it's dismissed.</summary>
     public class LampReminder
     {
@@ -253,10 +388,29 @@ namespace ReadyLauncher
         public string AllPartsColor = "";
         public LampPanelPlace LampPanel = LampPanelPlace.Off;   // a strip of blinking computer lamps along the top or bottom
         public LampActivity LampMode = LampActivity.Computing;
+        public LampActivityLevels LampCustomActivity = new LampActivityLevels();   // LampActivity.Custom: your own speeds and how many lit
+        [XmlArrayItem("Saved")] public List<LampActivityLevels> LampActivities = new List<LampActivityLevels>();   // custom activities saved under a name
         public LampMonitorPlace LampMonitor = LampMonitorPlace.None;   // the WOPR cabinet at one end of a strip above or below the launcher
-        public LampTextEffect LampTextMode = LampTextEffect.None;      // spell LampText on the strip, scrolling or flashing
+        public bool LampEightBall;                // a Magic 8 Ball in the monitor's window: click it for an answer on the strip
+        public bool LampEightBallInstant;         // Instant Response: its answer shows on the strip at once and stays until the ball is clicked again
+        public bool LampMonitorForBall;           // the monitor was put there for the ball (there was none before): it goes again with the ball
+        public LampColors LampColors = LampColors.RedAmber;
+        [XmlArrayItem("Color")] public List<LampHue> LampPicked = new List<LampHue>();   // the lamp colors you picked (LampColors.Picked): one or more
+        [XmlArrayItem("Color")] public List<LampCustomColor> LampCustom = new List<LampCustomColor>();   // and ones from the color wheel, ticked or not
+        public bool LampPastel;                   // softer, paler lamp colors
+        public int LampRows = 6;                  // the strip's height in lamps: 6 (text in capitals) to 10 (above 6, text in upper and lower case)
+        public LampTextEffect LampTextMode = LampTextEffect.None;      // spell LampText on the strip: scrolling, flashing, staying still, or coming out of the blinking and going back
         public string LampText = "";
         public bool LampTextSides;                // keep the lamps blinking on either side of the text
+        public bool LampTextTails;                // above six lamps high: smaller letters, with room for tails (g, j, p, q, y) below the line
+        public int LampTailRows = 2;              // how many of the rows are kept for them (1 to 4; a low strip has room for fewer)
+        /// <summary>The rows kept for tails at the strip's height (0: none).</summary>
+        [XmlIgnore] public int LampTails { get { return LampTextTails ? Math.Min(LampTailRows, LampFont.TailRowsFor(LampRows)) : 0; } }
+        public const int MinScrollSpeed = 25, MaxScrollSpeed = 300;
+        public string LampNumbers = NumberPattern.Usual;   // the pattern random numbers are picked with
+        [XmlArrayItem("Saved")] public List<LampNumberPattern> LampNumberPatterns = new List<LampNumberPattern>();   // patterns saved for later
+        [XmlArrayItem("Pick")] public List<LampNumberPick> LampNumberPicks = new List<LampNumberPick>();   // numbers picked, newest first
+        public int LampScrollSpeed = 100;         // percent: how fast the text scrolls (50 = half as fast, 200 = twice as fast)
         [XmlArrayItem("Reminder")] public List<LampReminder> Reminders = new List<LampReminder>();   // flashed on the lamp strip from their time on, until dismissed
         // The single reminder of version 1.75: read from older settings, moved into Reminders, and no longer written.
         public bool ReminderOn;
@@ -401,11 +555,15 @@ namespace ReadyLauncher
         public string AutoBackupFolder = "";      // empty = DefaultBackupFolder
         public DateTime LastAutoBackup;           // local time of the last automatic backup (MinValue = none yet)
 
-        /// <summary>Documents\Ready Launcher backups (or the folder from before the rename, while it's the only one).</summary>
+        /// <summary>
+        /// Documents\Ready Launcher backups (or the folder from before the rename, while it's the only one); a portable
+        /// copy's Backups folder beside it, so it all stays together.
+        /// </summary>
         public static string DefaultBackupFolder
         {
             get
             {
+                if (LauncherData.PortableFolder != null) return System.IO.Path.Combine(System.IO.Path.GetDirectoryName(LauncherData.PortableFolder), "Backups");
                 string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
                 string now = System.IO.Path.Combine(docs, "Ready Launcher backups"), old = System.IO.Path.Combine(docs, "WinLauncher backups");
                 return !Directory.Exists(now) && Directory.Exists(old) ? old : now;
@@ -611,6 +769,20 @@ namespace ReadyLauncher
             foreach (var h in Settings.DockHidden)   // no list recorded (version 1.67 hid an app from both)
                 if (h.HiddenLists().Count == 0) { h.SetHidden(DockSource.Frequent, true); h.SetHidden(DockSource.RecentlyInstalled, true); }
             if (Settings.Sensors == null) Settings.Sensors = new List<string>();
+            if (Settings.LampColors == LampColors.AsIs) Settings.LampColors = LampColors.RedAmber;
+            LampPalette.Retire(ref Settings.LampColors, ref Settings.LampPicked);
+            Settings.LampPicked = LampPalette.Tidy(Settings.LampPicked);
+            Settings.LampCustom = LampPalette.Tidy(Settings.LampCustom);
+            if (!NumberPattern.IsPattern(Settings.LampNumbers)) Settings.LampNumbers = NumberPattern.Usual;
+            Settings.LampNumbers = NumberPattern.Tidy(Settings.LampNumbers);
+            Settings.LampNumberPatterns = LauncherWindow.TidyPatterns(Settings.LampNumberPatterns);
+            Settings.LampNumberPicks = (Settings.LampNumberPicks ?? new List<LampNumberPick>()).Where(k => k != null && !string.IsNullOrWhiteSpace(k.Numbers))
+                .OrderByDescending(k => k.When).Take(LampNumberPick.MaxKept).ToList();
+            Settings.LampCustomActivity = (Settings.LampCustomActivity ?? new LampActivityLevels()).Copy("").Tidy();
+            Settings.LampActivities = LampActivityLevels.TidyList(Settings.LampActivities);
+            Settings.LampRows = Math.Max(LampFont.MinRows, Math.Min(LampFont.MaxRows, Settings.LampRows));
+            Settings.LampTailRows = Math.Max(1, Math.Min(LampFont.MaxTailRows, Settings.LampTailRows));
+            Settings.LampScrollSpeed = Math.Max(AppSettings.MinScrollSpeed, Math.Min(AppSettings.MaxScrollSpeed, Settings.LampScrollSpeed));
             if (Settings.Reminders == null) Settings.Reminders = new List<LampReminder>();
             Settings.Reminders.RemoveAll(r => r == null || string.IsNullOrWhiteSpace(r.Text));
             if (Settings.ReminderOn && !string.IsNullOrWhiteSpace(Settings.ReminderText))   // the single reminder of 1.75
@@ -633,12 +805,60 @@ namespace ReadyLauncher
             Decorations.RemoveAll(d => d == null);
         }
 
+        /// <summary>
+        /// The file that makes a copy portable: with it beside ReadyLauncher.exe, the icons, notes and settings are kept in
+        /// the Data folder beside them instead of in %APPDATA%\ReadyLauncher (the portable download comes with it).
+        /// </summary>
+        public const string PortableMarker = "portable.txt";
+
+        static bool portableChecked, portableBlocked;
+        static string portableFolder;
+
+        /// <summary>
+        /// A portable copy's Data folder (beside the exe), or null: not a portable copy, or one in a folder it can't write
+        /// to (see <see cref="PortableBlocked"/>), which keeps its setup in the usual place.
+        /// </summary>
+        public static string PortableFolder
+        {
+            get
+            {
+                if (portableChecked) return portableFolder;
+                portableChecked = true;
+                try
+                {
+                    string beside = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+                    if (!File.Exists(System.IO.Path.Combine(beside, PortableMarker))) return null;
+                    string data = System.IO.Path.Combine(beside, "Data");
+                    try
+                    {
+                        Directory.CreateDirectory(data);
+                        string probe = System.IO.Path.Combine(data, ".write-test");
+                        File.WriteAllText(probe, "");
+                        File.Delete(probe);
+                        portableFolder = data;
+                    }
+                    catch (Exception) { portableBlocked = true; }
+                }
+                catch (Exception) { }
+                return portableFolder;
+            }
+        }
+
+        /// <summary>A portable copy (portable.txt beside it) in a folder it can't write to, such as one only an administrator can change.</summary>
+        public static bool PortableBlocked { get { return PortableFolder == null && portableBlocked; } }
+
+        /// <summary>
+        /// Where the icons, notes and settings are kept: %APPDATA%\ReadyLauncher, or a portable copy's Data folder. A test
+        /// copy names its own with READYLAUNCHER_DATA, and never uses the real one.
+        /// </summary>
         public static string DataFolder
         {
             get
             {
                 string over = Environment.GetEnvironmentVariable("READYLAUNCHER_DATA"); // for testing with a separate data set
                 if (!string.IsNullOrEmpty(over)) return over;
+                if (PortableFolder != null) return PortableFolder;
+                if (Program.TestMode) return System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ReadyLauncher-test");
                 return System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ReadyLauncher");
             }
         }
@@ -651,6 +871,7 @@ namespace ReadyLauncher
         {
             get
             {
+                if (PortableFolder != null) return null;   // a portable copy starts with a setup of its own
                 if (Program.TestMode)
                 {
                     string test = Environment.GetEnvironmentVariable("READYLAUNCHER_OLD_DATA");

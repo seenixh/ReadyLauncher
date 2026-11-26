@@ -52,6 +52,7 @@ namespace ReadyLauncher
         public LauncherWindow(LauncherApp app)
         {
             this.app = app;
+            LampPanel.CustomLevels = () => S.LampCustomActivity;
             Title = Program.AppName;
             WindowStyle = WindowStyle.None;
             AllowsTransparency = true;
@@ -193,7 +194,7 @@ namespace ReadyLauncher
             ApplyLampText();   // what the strips spell, if anything
             if (S.LampPanel == LampPanelPlace.Top || S.LampPanel == LampPanelPlace.Bottom)
             {
-                lampStrip = new LampPanel(S.LampMode);
+                lampStrip = new LampPanel(S.LampMode, S.LampRows) { Palette = LampPalette.From(S) };
                 HookLampStrip(lampStrip, true);   // the strip moves the launcher, like the buttons row does; right-click: activity
                 DockPanel.SetDock(lampStrip, S.LampPanel == LampPanelPlace.Top ? Dock.Top : Dock.Bottom);
             }

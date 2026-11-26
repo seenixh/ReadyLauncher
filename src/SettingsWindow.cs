@@ -15,12 +15,15 @@ namespace ReadyLauncher
         ModifierKeys mods;
         Key key;
 
+        // The tabs, in order.
+        public const int GeneralTab = 0, AppearanceTab = 1, LampStripTab = 2, QuickLaunchTab = 3, NotesTab = 4, AppsTab = 5, HardwareTab = 6;
+
         public void ShowTab(int index)
         {
             if (index >= 0 && index < tabs.Items.Count) tabs.SelectedIndex = index;
         }
 
-        /// <summary>Scrolls the Appearance tab to the lamp strip's reminder.</summary>
+        /// <summary>Scrolls the Lamp strip tab to its reminders.</summary>
         public void ShowReminder()
         {
             Dispatcher.BeginInvoke(new Action(() => { if (addReminder != null) addReminder.BringIntoView(); }), System.Windows.Threading.DispatcherPriority.Loaded);
@@ -29,9 +32,30 @@ namespace ReadyLauncher
         // General
         TextBox hotkeyBox, customW, customH;
         TextBlock hotkeyHint;
-        ComboBox windowSize, animation, volume, volumeButtonHeight, lampPlace, lampMode, lampMonitor, lampTextMode, themeBox;
+        ComboBox windowSize, animation, volume, volumeButtonHeight, lampPlace, lampMode, lampMonitor, lampColors, lampRows, lampTailRows, lampTextMode, themeBox;
         TextBox lampText, reminderText;
-        CheckBox lampTextSides;
+        CheckBox lampTextSides, lampTextTails, lampEightBall, lampEightBallInstant;
+        bool monitorForBall;   // the monitor was put there for the ball: unticking the ball takes it away again
+        Dictionary<LampHue, CheckBox> lampHues = new Dictionary<LampHue, CheckBox>();
+        CheckBox lampPastel;
+        List<LampCustomColor> customs;   // colors from the wheel as edited here; kept with OK or Apply
+        WrapPanel customBoxes;
+        Button addCustom;
+        int tailRowsWanted;        // the lamps chosen for tails (kept while a lower strip has room for fewer)
+        bool fillingTailRows;
+        Slider lampScrollSpeed;
+        TextBox lampNumbers;
+        TextBlock lampNumbersExample;
+        ComboBox lampPatterns;
+        Button savePattern, deletePattern;
+        List<LampNumberPattern> patterns;   // saved number patterns as edited here; kept with OK or Apply
+        readonly Slider[] customLevel = new Slider[6];   // the custom activity: strip speed and lamps, monitor speed and lamps, red lamps' speed and lamps
+        Grid customLevelGrid;
+        ComboBox lampActivities;
+        Button saveActivity, deleteActivity;
+        FrameworkElement activityLine;
+        List<LampActivityLevels> activities;   // saved custom activities as edited here; kept with OK or Apply
+        bool fillingActivities, puttingLevels;
         ComboBox reminderMonth, reminderDay, reminderYear, reminderTime;
         StackPanel reminderList;
         Button addReminder;
@@ -111,6 +135,9 @@ namespace ReadyLauncher
             Topmost = true;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI");
+            MaxHeight = SystemParameters.WorkArea.Height;   // never taller than the screen: a page that doesn't fit scrolls
+            SourceInitialized += delegate { FitScreen(); };
+            LocationChanged += delegate { FitScreen(); };
 
             // The theme: colors now, the title bar once the window exists, and again whenever Windows switches
             // between light and dark (for "Follow system").
@@ -123,12 +150,13 @@ namespace ReadyLauncher
             Closed += delegate { closed = true; Microsoft.Win32.SystemEvents.UserPreferenceChanged -= systemChanged; };
 
             tabs = new TabControl { Margin = new Thickness(12, 12, 12, 0) };
-            tabs.Items.Add(new TabItem { Header = "General", Content = BuildGeneral(s) });
-            tabs.Items.Add(new TabItem { Header = "Appearance", Content = BuildAppearance(s) });
-            tabs.Items.Add(new TabItem { Header = "Quick launch strip", Content = BuildQuickLaunch(s) });
-            tabs.Items.Add(new TabItem { Header = "Notes", Content = BuildNotes(s) });
-            tabs.Items.Add(new TabItem { Header = "Apps", Content = BuildApps(s) });
-            tabs.Items.Add(new TabItem { Header = "Hardware monitoring", Content = BuildHardware(s) });
+            tabs.Items.Add(new TabItem { Header = "General", Content = Scrolling(BuildGeneral(s)) });
+            tabs.Items.Add(new TabItem { Header = "Appearance", Content = Scrolling(BuildAppearance(s)) });
+            tabs.Items.Add(new TabItem { Header = "Lamp strip", Content = Scrolling(BuildLampStrip(s)) });
+            tabs.Items.Add(new TabItem { Header = "Quick launch strip", Content = Scrolling(BuildQuickLaunch(s)) });
+            tabs.Items.Add(new TabItem { Header = "Notes", Content = Scrolling(BuildNotes(s)) });
+            tabs.Items.Add(new TabItem { Header = "Apps", Content = Scrolling(BuildApps(s)) });
+            tabs.Items.Add(new TabItem { Header = "Hardware monitoring", Content = Scrolling(BuildHardware(s)) });
             RestoreIfThemeGone(s);
 
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(12) };
@@ -155,6 +183,40 @@ namespace ReadyLauncher
                     string report = Environment.GetEnvironmentVariable("READYLAUNCHER_TOOLTIP_REPORT");
                     if (!string.IsNullOrEmpty(report)) System.IO.File.WriteAllLines(report, Undescribed());
                 };
+        }
+
+        /// <summary>No taller than the screen it's on (its taskbar left free).</summary>
+        void FitScreen()
+        {
+            var h = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            if (h == IntPtr.Zero) return;
+            double most = System.Windows.Forms.Screen.FromHandle(h).WorkingArea.Height / VisualTreeHelper.GetDpi(this).DpiScaleY, test;
+            if (Program.TestMode && double.TryParse(Environment.GetEnvironmentVariable("READYLAUNCHER_WORK_HEIGHT") ?? "", out test)) most = test;
+            most = Math.Max(300, most);
+            if (Math.Abs(MaxHeight - most) > 0.5) MaxHeight = most;
+        }
+
+        /// <summary>
+        /// A page that scrolls when it doesn't fit the window. The mouse wheel over a closed list scrolls the page rather
+        /// than changing the list's choice.
+        /// </summary>
+        static ScrollViewer Scrolling(UIElement page)
+        {
+            var sv = new ScrollViewer { Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false };
+            sv.PreviewMouseWheel += (o, e) =>
+            {
+                if (sv.ScrollableHeight <= 0) return;
+                for (var d = e.OriginalSource as DependencyObject; d != null && d != sv; d = d is Visual ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d))
+                {
+                    var list = d as ComboBox;
+                    if (list == null) continue;
+                    if (list.IsDropDownOpen) return;
+                    sv.ScrollToVerticalOffset(sv.VerticalOffset - e.Delta * 0.4);
+                    e.Handled = true;
+                    return;
+                }
+            };
+            return sv;
         }
 
         UIElement BuildGeneral(AppSettings s)
@@ -481,6 +543,11 @@ namespace ReadyLauncher
             checkUpdates.Click += delegate { CheckForUpdates(); };
             line.Children.Add(checkUpdates);
             stack.Children.Add(line);
+            // A portable copy says where it keeps everything (or why it can't).
+            string where = LauncherData.PortableFolder != null ? "Portable copy: your icons, notes and settings are kept in " + LauncherData.PortableFolder + "."
+                : LauncherData.PortableBlocked ? "This copy has " + LauncherData.PortableMarker + " beside it, but it can't write to its folder, so your icons, notes and settings are kept in "
+                    + LauncherData.DataFolder + "." : null;
+            if (where != null) stack.Children.Add(new TextBlock { Text = where, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 5, 0, 0), Opacity = 0.8 });
             updateStatus = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 5, 0, 0), Visibility = Visibility.Collapsed };
             stack.Children.Add(updateStatus);
             var project = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
@@ -617,28 +684,235 @@ namespace ReadyLauncher
             sameColor.Unchecked += delegate { partsState(); };
             partsState();
 
+            return g;
+        }
+
+        /// <summary>
+        /// The lamp strip's tab: where it goes and how it looks, the monitor and its Magic 8 Ball, text, random numbers and
+        /// reminders.
+        /// </summary>
+        UIElement BuildLampStrip(AppSettings s)
+        {
+            var g = Page();
             AddRow(g, "", new TextBlock
             {
-                Text = "A strip of blinking red and amber computer lamps, like the front of an early-1980s mainframe.",
-                FontSize = 11.5, Opacity = 0.7, Margin = new Thickness(0, 14, 0, 4), TextWrapping = TextWrapping.Wrap
+                Text = "A strip of blinking computer lamps, like the front of an early-1980s mainframe. Right-click the strip for a menu with all of these settings.",
+                FontSize = 11.5, Opacity = 0.7, Margin = new Thickness(0, 2, 0, 6), TextWrapping = TextWrapping.Wrap
             });
             lampPlace = Combo((int)s.LampPanel, "Off", "Along the top (inside, buttons below it)", "Along the bottom (inside)",
                               "Above the launcher (outside)", "Below the launcher (outside)",
                               "At the bottom of the quick launch strip", "Behind the quick launch strip's icons");
-            AddRow(g, "Lamp strip", lampPlace);
-            lampMode = Combo((int)s.LampMode, "Idle (slow, few lamps lit)", "Computing", "Alert (busier, with a sweep of light)", LauncherWindow.RandomLampsText);
+            AddRow(g, "Position", lampPlace);
+            lampColors = Combo(Array.IndexOf(LauncherWindow.ColorChoices, s.LampColors), LauncherWindow.ColorChoices.Select(LauncherWindow.ColorsText).ToArray());
+            AddRow(g, "Lamp colors", lampColors);
+            var hueBoxes = new WrapPanel { Margin = new Thickness(0, 3, 0, 0) };
+            lampPastel = Check("Pastel (softer colors)", s.LampPastel);
+            foreach (var h in LauncherWindow.Hues)
+            {
+                var one = h;
+                var dot = new System.Windows.Shapes.Ellipse { Width = 13, Height = 13, StrokeThickness = 1, Stroke = new SolidColorBrush(Color.FromArgb(120, 0, 0, 0)), VerticalAlignment = VerticalAlignment.Center };
+                Action paint = () => dot.Fill = new SolidColorBrush(LampPalette.Swatch(one, lampPastel.IsChecked == true));
+                paint();
+                lampPastel.Checked += delegate { paint(); };
+                lampPastel.Unchecked += delegate { paint(); };
+                var words = new StackPanel { Orientation = Orientation.Horizontal };
+                words.Children.Add(dot);
+                words.Children.Add(new TextBlock { Text = one.ToString(), Margin = new Thickness(5, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
+                var box = new CheckBox { Content = words, IsChecked = s.LampPicked.Contains(one), Width = 86, Margin = new Thickness(0, 2, 2, 2), VerticalContentAlignment = VerticalAlignment.Center };
+                lampHues[one] = box;
+                hueBoxes.Children.Add(box);
+            }
+            AddRow(g, "Your own colors", hueBoxes);
+            customs = LampPalette.Tidy(s.LampCustom);
+            customBoxes = new WrapPanel { VerticalAlignment = VerticalAlignment.Center };
+            var addWords = new StackPanel { Orientation = Orientation.Horizontal };
+            addWords.Children.Add(new TextBlock { Text = "\ue790", FontFamily = TileView.IconFont, FontSize = 13, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+            addWords.Children.Add(new TextBlock { Text = "Add a color...", VerticalAlignment = VerticalAlignment.Center });
+            addCustom = new Button { Content = addWords, Padding = new Thickness(10, 2, 10, 2), Margin = new Thickness(0, 2, 0, 2), HorizontalAlignment = HorizontalAlignment.Left,
+                                     ToolTip = "Pick any color from a color wheel for the lamps (up to " + LampPalette.MaxCustom + " of them)" };
+            addCustom.Click += delegate { PickCustom(null); };
+            var customLine = new StackPanel();
+            customLine.Children.Add(customBoxes);
+            customLine.Children.Add(addCustom);
+            AddRow(g, "Custom colors", customLine);
+            lampPastel.Checked += delegate { FillCustoms(); };
+            lampPastel.Unchecked += delegate { FillCustoms(); };
+            AddRow(g, "", lampPastel);
+            lampRows = Combo(s.LampRows - LampFont.MinRows, Enumerable.Range(LampFont.MinRows, LampFont.MaxRows - LampFont.MinRows + 1).Select(LauncherWindow.HeightText).ToArray());
+            AddRow(g, "Lamp strip height", lampRows);
+            lampTextTails = Check("Leave room for the tails of g, j, p, q and y", s.LampTextTails);
+            AddRow(g, "", lampTextTails);
+            tailRowsWanted = s.LampTailRows;
+            lampTailRows = Combo(0);
+            lampTailRows.SelectionChanged += delegate { if (!fillingTailRows && lampTailRows.SelectedIndex >= 0) tailRowsWanted = lampTailRows.SelectedIndex + 1; };
+            AddRow(g, "Lamps for tails", lampTailRows);
+            lampMode = Combo((int)s.LampMode, "Standby (slowest, few lamps lit)", "Idle (slow, few lamps lit)", "Computing", "Alert (busier, with a sweep of light)",
+                             LauncherWindow.RandomLampsText, LauncherWindow.CustomLampsText);
             AddRow(g, "Lamp activity", lampMode);
+
+            // Your own activity: how quick, and how many lit, for the strip's lamps, the monitor's lamps and its small red
+            // lamps; and ones saved under a name. Moving a slider chooses Custom above.
+            var levels = s.LampCustomActivity ?? new LampActivityLevels();
+            customLevelGrid = new Grid { Margin = new Thickness(0, 2, 0, 2), HorizontalAlignment = HorizontalAlignment.Left };
+            foreach (var w in new[] { GridLength.Auto, new GridLength(120), new GridLength(34), new GridLength(120), new GridLength(40) })
+                customLevelGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = w });
+            for (int r = 0; r < 4; r++) customLevelGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Action<UIElement, int, int> place = (e, r, col) => { Grid.SetRow(e, r); Grid.SetColumn(e, col); customLevelGrid.Children.Add(e); };
+            place(new TextBlock { Text = "Speed", Opacity = 0.7, FontSize = 11.5 }, 0, 1);
+            place(new TextBlock { Text = "Lamps lit", Opacity = 0.7, FontSize = 11.5 }, 0, 3);
+            string[] levelParts = { "Lamp strip", "Monitor lamps", "Monitor red lamps" };
+            int[] levelNow = { levels.StripSpeed, levels.StripLamps, levels.MonitorSpeed, levels.MonitorLamps, levels.LedSpeed, levels.LedLamps };
+            for (int k = 0; k < 6; k++)
+            {
+                if (k % 2 == 0) place(new TextBlock { Text = levelParts[k / 2], VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) }, k / 2 + 1, 0);
+                bool speed = k % 2 == 0;
+                string unit = speed ? "" : "%";
+                var sl = new Slider
+                {
+                    Minimum = speed ? LampActivityLevels.MinSpeed : 0, Maximum = speed ? LampActivityLevels.MaxSpeed : 100, IsSnapToTickEnabled = true, TickFrequency = 1,
+                    SmallChange = 1, LargeChange = speed ? 2 : 10, VerticalAlignment = VerticalAlignment.Center, ToolTip = speed ? LauncherWindow.SpeedTip : LauncherWindow.LampsTip
+                };
+                sl.Value = Math.Max(sl.Minimum, Math.Min(sl.Maximum, levelNow[k]));
+                var shows = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0), Text = (int)sl.Value + unit };
+                sl.ValueChanged += delegate
+                {
+                    shows.Text = (int)sl.Value + unit;
+                    if (puttingLevels) return;
+                    lampMode.SelectedIndex = (int)LampActivity.Custom;
+                    FillActivities();
+                };
+                customLevel[k] = sl;
+                place(sl, k / 2 + 1, speed ? 1 : 3);
+                place(shows, k / 2 + 1, speed ? 2 : 4);
+            }
+            AddRow(g, "Custom activity", customLevelGrid);
+            activities = LampActivityLevels.TidyList(s.LampActivities);
+            lampActivities = new ComboBox { Width = 250, Padding = new Thickness(6, 4, 6, 4), ToolTip = "Choose a saved activity to put it on the sliders above and use it" };
+            saveActivity = new Button { Content = "Save...", Padding = new Thickness(12, 2, 12, 2), Margin = new Thickness(8, 0, 0, 0), ToolTip = "Keep the sliders' settings under a name, to use again later" };
+            deleteActivity = new Button { Content = "Delete", Padding = new Thickness(12, 2, 12, 2), Margin = new Thickness(8, 0, 0, 0), ToolTip = "Delete the saved activity chosen here" };
+            var activityRow = new StackPanel { Orientation = Orientation.Horizontal };
+            activityRow.Children.Add(lampActivities);
+            activityRow.Children.Add(saveActivity);
+            activityRow.Children.Add(deleteActivity);
+            activityLine = activityRow;
+            AddRow(g, "Saved activities", activityRow);
+            lampActivities.SelectionChanged += delegate
+            {
+                if (fillingActivities || lampActivities.SelectedIndex < 0) return;
+                PutLevels(activities[lampActivities.SelectedIndex]);
+                lampMode.SelectedIndex = (int)LampActivity.Custom;
+            };
+            saveActivity.Click += delegate
+            {
+                var l = LevelsChosen();
+                var had = activities.FirstOrDefault(a => a.SameAs(l));
+                string name = InputDialog.Ask(this, app, "Save the lamp activity", "A name for this lamp activity:\n\n" + l.Summary(), had != null ? had.Name : LampActivityLevels.NextName(activities));
+                if (name == null) return;
+                activities = LampActivityLevels.Save(activities, name, l);
+                lampMode.SelectedIndex = (int)LampActivity.Custom;
+                FillActivities();
+            };
+            deleteActivity.Click += delegate
+            {
+                if (lampActivities.SelectedIndex < 0) return;
+                var a = activities[lampActivities.SelectedIndex];
+                if (!DeleteDialog.AskActivity(this, theme, a.Name, a.Summary())) return;
+                activities.Remove(a);
+                FillActivities();
+            };
+            FillActivities();
             lampMonitor = Combo((int)s.LampMonitor, "None", "At the left end of the strip", "At the right end of the strip");
             lampMonitor.ToolTip = "A computer cabinet lettered WOPR, with a few lamps blinking in its window, standing at one end of the strip and rising above it. It shows when the strip is above or below the launcher (outside).";
             AddRow(g, "Monitor", lampMonitor);
-            lampTextMode = Combo((int)s.LampTextMode, "None (the lamps just blink)", "Scroll it across the strip", "Flash it on the strip");
+            lampTextMode = Combo((int)s.LampTextMode, "None (the lamps just blink)", "Scroll it across the strip", "Flash it on the strip", "Keep it still on the strip", "Fade it in out of the blinking lamps, and back");
             lampTextMode.ToolTip = "Spells out your text in lamps on the strip, instead of blinking.";
             AddRow(g, "Lamp text", lampTextMode);
             lampText = new TextBox { Text = s.LampText ?? "", Width = 250, MaxLength = 200, Padding = new Thickness(3), HorizontalAlignment = HorizontalAlignment.Left,
-                                     ToolTip = "Letters, numbers and common punctuation (small letters show as capitals)" };
+                                     ToolTip = "Letters, numbers and common punctuation (small letters show as capitals when the strip is 6 lamps high)" };
             AddRow(g, "Text to show", lampText);
             lampTextSides = Check("Keep the lamps blinking on either side of the text", s.LampTextSides);
             AddRow(g, "", lampTextSides);
+            lampScrollSpeed = AddSliderRow(g, "Text scroll speed", s.LampScrollSpeed, AppSettings.MinScrollSpeed, AppSettings.MaxScrollSpeed, "%");
+
+            // The Magic 8 Ball: in the monitor (a monitor goes at the right end if there's none, and goes again when the
+            // ball is unticked), and Instant Response.
+            lampEightBall = Check("In the monitor (click it for an answer)", s.LampEightBall && s.LampMonitor != LampMonitorPlace.None);
+            lampEightBallInstant = Check("Instant Response (the answer shows at once and stays until you click the ball again)", s.LampEightBallInstant);
+            lampEightBallInstant.Margin = new Thickness(22, 0, 0, 3);
+            monitorForBall = s.LampEightBall && s.LampMonitorForBall;
+            lampEightBall.Checked += delegate
+            {
+                monitorForBall = lampMonitor.SelectedIndex == (int)LampMonitorPlace.None;
+                if (monitorForBall) lampMonitor.SelectedIndex = (int)LampMonitorPlace.Right;
+            };
+            lampEightBall.Unchecked += delegate
+            {
+                bool back = monitorForBall;
+                monitorForBall = false;
+                if (back) lampMonitor.SelectedIndex = (int)LampMonitorPlace.None;   // as it was before the ball
+            };
+            lampMonitor.SelectionChanged += delegate { if (lampMonitor.SelectedIndex == (int)LampMonitorPlace.None) lampEightBall.IsChecked = false; };
+            AddRow(g, "Magic 8 Ball", lampEightBall);
+            AddRow(g, "", lampEightBallInstant);
+
+            // Random numbers: the pattern they're picked with (an example of what it picks, or what's wrong with it), and
+            // patterns saved for later. Right-clicking the strip picks them.
+            lampNumbers = new TextBox { Text = s.LampNumbers ?? "", Width = 250, MaxLength = 300, Padding = new Thickness(3), VerticalContentAlignment = VerticalAlignment.Center,
+                                        ToolTip = "Groups separated by commas, each like xxx/0-999: an x for each digit, then a slash and the lowest and highest number" };
+            savePattern = new Button { Content = "Save...", Padding = new Thickness(12, 2, 12, 2), Margin = new Thickness(8, 0, 0, 0), ToolTip = "Keep this pattern under a name, to use again later" };
+            var numberLine = new StackPanel { Orientation = Orientation.Horizontal };
+            numberLine.Children.Add(lampNumbers);
+            numberLine.Children.Add(savePattern);
+            lampNumbersExample = new TextBlock { FontSize = 11.5, Margin = new Thickness(0, 4, 0, 0), TextWrapping = TextWrapping.Wrap, MaxWidth = 420, HorizontalAlignment = HorizontalAlignment.Left };
+            var numberRow = new StackPanel();
+            numberRow.Children.Add(numberLine);
+            numberRow.Children.Add(lampNumbersExample);
+            AddRow(g, "Random numbers", numberRow);
+            patterns = LauncherWindow.TidyPatterns(s.LampNumberPatterns);
+            lampPatterns = new ComboBox { Width = 250, Padding = new Thickness(6, 4, 6, 4), ToolTip = "Choose a saved pattern to use it" };
+            deletePattern = new Button { Content = "Delete", Padding = new Thickness(12, 2, 12, 2), Margin = new Thickness(8, 0, 0, 0), ToolTip = "Delete the saved pattern chosen here" };
+            var savedLine = new StackPanel { Orientation = Orientation.Horizontal };
+            savedLine.Children.Add(lampPatterns);
+            savedLine.Children.Add(deletePattern);
+            AddRow(g, "Saved patterns", savedLine);
+            Action showNumbers = () =>
+            {
+                string problem;
+                var p = NumberPattern.Parse(lampNumbers.Text, out problem);
+                lampNumbersExample.Text = p == null ? problem : "For example: " + p.Pick() + "  (right-click the strip and choose Pick random numbers)";
+                lampNumbersExample.Opacity = p == null ? 1 : 0.7;
+                // what's wrong, in red; an example, in the usual color
+                if (p == null) lampNumbersExample.Foreground = new SolidColorBrush(Color.FromRgb(0xD2, 0x3C, 0x3C));
+                else lampNumbersExample.ClearValue(TextBlock.ForegroundProperty);
+                lampNumbersExample.FontWeight = p == null ? FontWeights.SemiBold : FontWeights.Normal;
+                savePattern.IsEnabled = p != null && lampNumbers.IsEnabled;
+                FillPatterns();
+            };
+            lampNumbers.TextChanged += delegate { showNumbers(); };
+            lampPatterns.SelectionChanged += delegate
+            {
+                if (fillingPatterns || lampPatterns.SelectedIndex < 0) return;
+                lampNumbers.Text = patterns[lampPatterns.SelectedIndex].Pattern;
+            };
+            savePattern.Click += delegate
+            {
+                string pattern = NumberPattern.Tidy(lampNumbers.Text);
+                var had = patterns.FirstOrDefault(p => p.Pattern == pattern);
+                string name = InputDialog.Ask(this, app, "Save the number pattern", "A name for " + pattern + " (leave it empty to call it by the pattern itself):", had != null ? had.Name : "");
+                if (name == null) return;
+                patterns = LauncherWindow.SavePattern(patterns, name, pattern);
+                lampNumbers.Text = pattern;
+                FillPatterns();
+            };
+            deletePattern.Click += delegate
+            {
+                if (lampPatterns.SelectedIndex < 0) return;
+                var p = patterns[lampPatterns.SelectedIndex];
+                if (!DeleteDialog.AskPattern(this, theme, p.Name, p.Pattern)) return;
+                patterns.Remove(p);
+                FillPatterns();
+            };
+            showNumbers();
 
             // Reminders: each flashes on the strip from its date and time on, until it's dismissed. A new one's date
             // starts at tomorrow, 9:00 AM.
@@ -677,15 +951,338 @@ namespace ReadyLauncher
             Action lampState = () =>
             {
                 bool strip = lampPlace.SelectedIndex != (int)LampPanelPlace.Off;
-                lampMode.IsEnabled = strip;
+                lampMode.IsEnabled = lampRows.IsEnabled = lampColors.IsEnabled = lampPastel.IsEnabled = strip;
+                hueBoxes.IsEnabled = customBoxes.IsEnabled = strip && LampColorsChosen == LampColors.Picked;
+                addCustom.IsEnabled = strip && customs.Count < LampPalette.MaxCustom;
+                lampTextTails.IsEnabled = strip && LampFont.TailRowsFor(LampRowsChosen) > 0;
+                FillTailRows();
+                lampTailRows.IsEnabled = lampTextTails.IsEnabled && lampTextTails.IsChecked == true;
                 lampTextMode.IsEnabled = lampText.IsEnabled = lampTextSides.IsEnabled = strip;
-                lampMonitor.IsEnabled = lampPlace.SelectedIndex == (int)LampPanelPlace.AboveLauncher || lampPlace.SelectedIndex == (int)LampPanelPlace.BelowLauncher;
+                ((FrameworkElement)lampScrollSpeed.Parent).IsEnabled = strip && lampTextMode.SelectedIndex == (int)LampTextEffect.Scroll;
+                lampMonitor.IsEnabled = lampEightBall.IsEnabled = lampPlace.SelectedIndex == (int)LampPanelPlace.AboveLauncher || lampPlace.SelectedIndex == (int)LampPanelPlace.BelowLauncher;
+                lampEightBallInstant.IsEnabled = lampEightBall.IsEnabled && lampEightBall.IsChecked == true;
                 reminderList.IsEnabled = reminderMonth.IsEnabled = reminderDay.IsEnabled = reminderYear.IsEnabled = reminderTime.IsEnabled = strip;
                 reminderText.IsEnabled = addReminder.IsEnabled = strip;
+                lampNumbers.IsEnabled = lampPatterns.IsEnabled = strip;
+                customLevelGrid.IsEnabled = strip;
+                FillActivities();
+                savePattern.IsEnabled = strip && NumberPattern.IsPattern(lampNumbers.Text);
+                deletePattern.IsEnabled = strip && lampPatterns.SelectedIndex >= 0;
             };
             lampPlace.SelectionChanged += delegate { lampState(); };
+            lampTextMode.SelectionChanged += delegate { lampState(); };
+            lampRows.SelectionChanged += delegate { lampState(); };
+            lampColors.SelectionChanged += delegate
+            {
+                if (LampColorsChosen == LampColors.Picked && ColorsTicked == 0) lampHues[LampHue.Blue].IsChecked = true;   // something to start from
+                lampState();
+            };
+            foreach (var box in lampHues.Values)   // your own colors: at least one stays ticked
+            {
+                var one = box;
+                one.Unchecked += delegate { if (LampColorsChosen == LampColors.Picked && ColorsTicked == 0) one.IsChecked = true; };
+            }
+            lampTextTails.Checked += delegate { lampState(); };
+            lampEightBall.Checked += delegate { lampState(); };
+            lampEightBall.Unchecked += delegate { lampState(); };
+            lampTextTails.Unchecked += delegate { lampState(); };
+            customsChanged = lampState;
+            FillCustoms();
             lampState();
             return g;
+        }
+
+        Action customsChanged = delegate { };
+
+        /// <summary>How many of your own colors are ticked, ones from the wheel too.</summary>
+        int ColorsTicked { get { return HuesPicked.Count + customs.Count(c => c.On); } }
+
+        static Button SmallButton(string glyph, string tip)
+        {
+            return new Button { Content = new TextBlock { Text = glyph, FontFamily = TileView.IconFont, FontSize = 12 }, Width = 24, Height = 24, Padding = new Thickness(0),
+                                Margin = new Thickness(0, 1, 2, 1), VerticalAlignment = VerticalAlignment.Center, ToolTip = tip };
+        }
+
+        /// <summary>The colors from the wheel: a checkbox for each, and buttons to change it or take it off the list.</summary>
+        void FillCustoms()
+        {
+            customBoxes.Children.Clear();
+            foreach (var c in customs)
+            {
+                var one = c;
+                var words = new StackPanel { Orientation = Orientation.Horizontal };
+                System.Windows.Shapes.Ellipse dot;
+                var change = LauncherWindow.ClickableDot(LampPalette.Swatch(one.Color, lampPastel.IsChecked == true), "Change this color with the color wheel", out dot, () => PickCustom(one));
+                change.Margin = new Thickness(-2);
+                words.Children.Add(change);
+                words.Children.Add(new TextBlock { Text = one.Color, Margin = new Thickness(5, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
+                var box = new CheckBox { Content = words, IsChecked = one.On, Width = 98, VerticalAlignment = VerticalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center,
+                                         ToolTip = "Use this color for the lamps" };
+                box.Checked += delegate { one.On = true; };
+                box.Unchecked += delegate
+                {
+                    one.On = false;
+                    if (LampColorsChosen == LampColors.Picked && ColorsTicked == 0) box.IsChecked = true;   // at least one stays ticked
+                };
+                var remove = SmallButton("\ue711", "Delete this color");
+                remove.Click += delegate
+                {
+                    if (!DeleteDialog.Ask(this, theme, one.Color, LampPalette.Swatch(one.Color, lampPastel.IsChecked == true))) return;
+                    customs.Remove(one);
+                    if (LampColorsChosen == LampColors.Picked && ColorsTicked == 0) lampHues[LampHue.Blue].IsChecked = true;
+                    FillCustoms();
+                    customsChanged();
+                };
+                var chip = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 14, 2) };
+                chip.Children.Add(box);
+                chip.Children.Add(remove);
+                customBoxes.Children.Add(chip);
+            }
+        }
+
+        /// <summary>The color wheel: a new color, or another in place of one on the list; it's ticked, and your own colors used.</summary>
+        void PickCustom(LampCustomColor change)
+        {
+            string start = change != null ? change.Color : customs.Count > 0 ? customs[customs.Count - 1].Color
+                : LampPalette.Hex(LampPalette.Swatch(HuesPicked.Count > 0 ? HuesPicked[0] : LampHue.Amber, false).ToString());
+            string picked = LampPalette.Hex(ColorPickerDialog.Pick(this, start));
+            if (picked == null) return;
+            if (change != null) { change.Color = picked; change.On = true; }
+            else if (customs.All(c => c.Color != picked)) customs.Add(new LampCustomColor { Color = picked, On = true });
+            foreach (var c in customs) if (c.Color == picked) c.On = true;   // one that was there already
+            customs = LampPalette.Tidy(customs);
+            lampColors.SelectedIndex = Array.IndexOf(LauncherWindow.ColorChoices, LampColors.Picked);
+            FillCustoms();
+            customsChanged();
+        }
+
+        LampColors LampColorsChosen { get { return LauncherWindow.ColorChoices[Math.Max(0, lampColors.SelectedIndex)]; } }
+        List<LampHue> HuesPicked { get { return LauncherWindow.Hues.Where(h => lampHues[h].IsChecked == true).ToList(); } }
+        int LampRowsChosen { get { return LampFont.MinRows + Math.Max(0, lampRows.SelectedIndex); } }
+
+        /// <summary>The custom activity's sliders, as they're set.</summary>
+        LampActivityLevels LevelsChosen()
+        {
+            Func<int, int> v = i => (int)customLevel[i].Value;
+            return new LampActivityLevels { StripSpeed = v(0), StripLamps = v(1), MonitorSpeed = v(2), MonitorLamps = v(3), LedSpeed = v(4), LedLamps = v(5) };
+        }
+
+        /// <summary>Sets the custom activity's sliders (without choosing Custom).</summary>
+        void PutLevels(LampActivityLevels l)
+        {
+            puttingLevels = true;
+            try
+            {
+                int[] v = { l.StripSpeed, l.StripLamps, l.MonitorSpeed, l.MonitorLamps, l.LedSpeed, l.LedLamps };
+                for (int k = 0; k < 6; k++) customLevel[k].Value = v[k];
+            }
+            finally { puttingLevels = false; }
+            FillActivities();
+        }
+
+        /// <summary>The saved custom activities, the one with the sliders' settings chosen (none if they aren't saved).</summary>
+        void FillActivities()
+        {
+            if (lampActivities == null || activities == null || customLevel[5] == null) return;
+            fillingActivities = true;
+            try
+            {
+                var names = activities.Select(a => a.Name).ToList();
+                if (!names.SequenceEqual(lampActivities.Items.Cast<string>()))
+                {
+                    lampActivities.Items.Clear();
+                    foreach (var x in names) lampActivities.Items.Add(x);
+                }
+                var now = LevelsChosen();
+                lampActivities.SelectedIndex = activities.FindIndex(a => a.SameAs(now));
+                bool strip = customLevelGrid.IsEnabled;
+                lampActivities.IsEnabled = activities.Count > 0 && strip;
+                deleteActivity.IsEnabled = lampActivities.SelectedIndex >= 0 && strip;
+                saveActivity.IsEnabled = strip && (activities.Count < LampActivityLevels.MaxSaved || lampActivities.SelectedIndex >= 0);
+            }
+            finally { fillingActivities = false; }
+        }
+
+        /// <summary>Scrolls the Lamp strip tab to the custom activity.</summary>
+        /// <summary>Test copies only: scrolls to the Magic 8 Ball.</summary>
+        public void ShowEightBall()
+        {
+            Dispatcher.BeginInvoke(new Action(() => { if (lampEightBallInstant != null) lampEightBallInstant.BringIntoView(); }), System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+
+        /// <summary>
+        /// Test copies only: ticking the Magic 8 Ball with no monitor and unticking it (the monitor comes and goes again),
+        /// the same with a monitor already there (it stays), Instant Response, and that Apply keeps them.
+        /// </summary>
+        internal string TestEightBall()
+        {
+            var log = new List<string>();
+            Func<string> now = () => "monitor " + lampMonitor.SelectedItem + "; ball " + lampEightBall.IsChecked + "; Instant Response " + lampEightBallInstant.IsChecked + (lampEightBallInstant.IsEnabled ? "" : " (off)");
+            Func<string> kept = () => { var st = app.Data.Settings; return "saved: monitor " + st.LampMonitor + (st.LampMonitorForBall ? " (for the ball)" : "") + ", ball " + st.LampEightBall + ", instant " + st.LampEightBallInstant; };
+            log.Add("at first: " + now());
+            lampMonitor.SelectedIndex = (int)LampMonitorPlace.None;
+            log.Add("no monitor: " + now());
+            lampEightBall.IsChecked = true;
+            log.Add("ball ticked: " + now());
+            lampEightBall.IsChecked = false;
+            log.Add("ball unticked: " + now());
+            lampMonitor.SelectedIndex = (int)LampMonitorPlace.Left;
+            lampEightBall.IsChecked = true;
+            log.Add("monitor at the left, ball ticked: " + now());
+            lampEightBall.IsChecked = false;
+            log.Add("ball unticked: " + now());
+            lampMonitor.SelectedIndex = (int)LampMonitorPlace.None;
+            lampEightBall.IsChecked = true;
+            lampEightBallInstant.IsChecked = true;
+            log.Add("no monitor, then ball and Instant Response ticked: " + now());
+            Apply();
+            log.Add("after Apply: " + kept());
+            lampMonitor.SelectedIndex = (int)LampMonitorPlace.None;
+            log.Add("monitor set to None: " + now());
+            Apply();
+            log.Add("after Apply: " + kept());
+            return string.Join("\r\n", log);
+        }
+
+        public void ShowActivity()
+        {
+            Dispatcher.BeginInvoke(new Action(() => { if (activityLine != null) activityLine.BringIntoView(); }), System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+
+        /// <summary>
+        /// Test copies only: moving the custom activity's sliders (Custom is chosen), saving them under a name and with
+        /// none, choosing a saved one, deleting one (asked first), and that Apply keeps them.
+        /// </summary>
+        internal string TestLampActivity()
+        {
+            var log = new List<string>();
+            Func<string> now = () => "activity " + lampMode.SelectedItem + "; sliders: " + LevelsChosen().Summary() + " | saved: " + string.Join(" / ", lampActivities.Items.Cast<string>())
+                + ", chosen " + lampActivities.SelectedIndex + (saveActivity.IsEnabled ? "" : ", can't save") + (deleteActivity.IsEnabled ? "" : ", can't delete");
+            log.Add("at first: " + now());
+            customLevel[0].Value = 3;
+            customLevel[5].Value = 30;
+            log.Add("two sliders moved: " + now());
+            InputDialog.TestAnswers.Enqueue("Calm");
+            saveActivity.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            log.Add("saved as Calm: " + now() + "; asked: " + (InputDialog.TestAsked ?? "").Replace("\n", " / "));
+            customLevel[0].Value = 17;
+            customLevel[1].Value = 80;
+            InputDialog.TestAnswers.Enqueue("");
+            saveActivity.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            log.Add("saved with no name: " + now());
+            customLevel[2].Value = 1;
+            InputDialog.TestAnswers.Enqueue("<cancel>");
+            saveActivity.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            log.Add("save canceled: " + now());
+            lampMode.SelectedIndex = (int)LampActivity.Idle;
+            lampActivities.SelectedIndex = 0;
+            log.Add("Idle, then Calm chosen: " + now());
+            DeleteDialog.TestAnswer = false;
+            deleteActivity.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            log.Add("Delete, then Cancel (asked about " + DeleteDialog.TestAsked + "): " + now());
+            lampActivities.SelectedIndex = 1;
+            DeleteDialog.TestAnswer = true;
+            deleteActivity.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            DeleteDialog.TestAnswer = null;
+            log.Add("the second deleted: " + now());
+            lampActivities.SelectedIndex = 0;
+            Apply();
+            var st = app.Data.Settings;
+            log.Add("after Apply: saved " + st.LampMode + ", " + st.LampCustomActivity.Summary() + " | " + string.Join(" / ", st.LampActivities.Select(a => a.Name + " = " + a.Summary())));
+            var look = LookFromControls();
+            log.Add("the look has " + look.LampMode + ", " + (look.LampCustomActivity == null ? "no custom activity" : look.LampCustomActivity.Summary()));
+            PutLevels(new LampActivityLevels { StripSpeed = 5 });
+            log.Add("sliders put from elsewhere (Custom isn't chosen by that): " + now());
+            PutLook(look);
+            log.Add("the look put back: " + now());
+            return string.Join("\r\n", log);
+        }
+
+        bool fillingPatterns;
+
+        /// <summary>The saved patterns ("name: pattern"), the one in the pattern box chosen (none if it isn't saved).</summary>
+        void FillPatterns()
+        {
+            if (lampPatterns == null || patterns == null) return;
+            fillingPatterns = true;
+            try
+            {
+                var texts = patterns.Select(p => p.Name == p.Pattern ? p.Pattern : p.Name + ":  " + p.Pattern).ToList();
+                if (!texts.SequenceEqual(lampPatterns.Items.Cast<string>()))
+                {
+                    lampPatterns.Items.Clear();
+                    foreach (var x in texts) lampPatterns.Items.Add(x);
+                }
+                string now = NumberPattern.Tidy(lampNumbers.Text);
+                lampPatterns.SelectedIndex = patterns.FindIndex(p => p.Pattern == now);
+                lampPatterns.IsEnabled = patterns.Count > 0 && lampNumbers.IsEnabled;
+                deletePattern.IsEnabled = lampPatterns.SelectedIndex >= 0 && lampNumbers.IsEnabled;
+            }
+            finally { fillingPatterns = false; }
+        }
+
+        /// <summary>
+        /// Test copies only: typing number patterns (what's shown under the box), saving and choosing them, deleting one
+        /// (asked first), and that Apply keeps them (a pattern that isn't one isn't kept).
+        /// </summary>
+        internal string TestNumbers()
+        {
+            var log = new List<string>();
+            Func<string> now = () => "'" + lampNumbers.Text + "': " + lampNumbersExample.Text + " | saved: " + string.Join(" / ", lampPatterns.Items.Cast<string>()) + ", chosen " + lampPatterns.SelectedIndex
+                + (savePattern.IsEnabled ? "" : ", can't save") + (deletePattern.IsEnabled ? "" : ", can't delete");
+            log.Add("at first: " + now());
+            foreach (var t in new[] { "xx/1-49, xx/1-49,xx/1-49", "x/1-6", "XXX", "xx/0-999", "xx/50-10", "abc", "x/1-6,,x/1-6", "", "xxxxxxxxxx", string.Join(",", Enumerable.Repeat("x", 21)) })
+            {
+                lampNumbers.Text = t;
+                log.Add("typed " + now());
+            }
+            lampNumbers.Text = "xx/1-49,xx/1-49,xx/1-49,xx/1-49,xx/1-49,xx/1-49";
+            InputDialog.TestAnswers.Enqueue("Lottery");
+            savePattern.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            log.Add("saved as Lottery: " + now());
+            lampNumbers.Text = "x/1-6,x/1-6";
+            InputDialog.TestAnswers.Enqueue("");
+            savePattern.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            log.Add("saved with no name: " + now());
+            lampNumbers.Text = "xxx/100-999";
+            InputDialog.TestAnswers.Enqueue("<cancel>");
+            savePattern.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            log.Add("save canceled: " + now());
+            lampPatterns.SelectedIndex = 0;
+            log.Add("Lottery chosen: " + now());
+            DeleteDialog.TestAnswer = false;
+            deletePattern.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            log.Add("Delete, then Cancel (asked about " + DeleteDialog.TestAsked + "): " + now());
+            lampPatterns.SelectedIndex = 1;
+            DeleteDialog.TestAnswer = true;
+            deletePattern.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            DeleteDialog.TestAnswer = null;
+            log.Add("the dice deleted: " + now());
+            lampNumbers.Text = "xx/1-49,xx/1-49,xx/1-49,xx/1-49,xx/1-49,xx/1-49";
+            Apply();
+            log.Add("after Apply: saved " + app.Data.Settings.LampNumbers + "; " + string.Join(" / ", app.Data.Settings.LampNumberPatterns.Select(p => p.Name + " = " + p.Pattern)));
+            lampNumbers.Text = "not one";
+            Apply();
+            log.Add("after Apply with 'not one': saved " + app.Data.Settings.LampNumbers);
+            return string.Join("\r\n", log);
+        }
+
+        /// <summary>The choices of lamps for tails, for the strip height chosen (a lower strip has room for fewer).</summary>
+        void FillTailRows()
+        {
+            int rows = LampRowsChosen, most = LampFont.TailRowsFor(rows);
+            var texts = Enumerable.Range(1, Math.Max(1, most)).Select(k => LauncherWindow.TailText(Math.Max(rows, LampFont.MinRows + 1), k)).ToList();
+            fillingTailRows = true;
+            try
+            {
+                if (!texts.SequenceEqual(lampTailRows.Items.Cast<string>()))
+                {
+                    lampTailRows.Items.Clear();
+                    foreach (var x in texts) lampTailRows.Items.Add(x);
+                }
+                lampTailRows.SelectedIndex = Math.Min(tailRowsWanted, texts.Count) - 1;
+            }
+            finally { fillingTailRows = false; }
         }
 
         /// <summary>The reminders, soonest first, each with its own Delete button.</summary>
@@ -760,6 +1357,150 @@ namespace ReadyLauncher
         }
 
         /// <summary>
+        /// Test copies only: the lamp strip's height and scroll speed: when they can be changed, that Apply keeps them,
+        /// and that saved looks bring the height along (a look from before 1.88 leaves it alone).
+        /// </summary>
+        internal string TestLampSize()
+        {
+            var log = new List<string>();
+            Func<string> now = () => "'" + lampColors.SelectedItem + "'" + (lampColors.IsEnabled ? "" : " (off)") + ", height '" + lampRows.SelectedItem + "'" + (lampRows.IsEnabled ? "" : " (off)")
+                + ", tails " + (lampTextTails.IsChecked == true ? "ticked" : "not ticked") + (lampTextTails.IsEnabled ? "" : " (off)")
+                + ", '" + lampTailRows.SelectedItem + "'" + (lampTailRows.IsEnabled ? "" : " (off)")
+                + ", scroll speed " + (int)lampScrollSpeed.Value + "%" + (lampScrollSpeed.IsEnabled ? "" : " (off)");
+            log.Add("at first: " + now());
+            lampTextMode.SelectedIndex = (int)LampTextEffect.Scroll;
+            log.Add("text scrolling: " + now());
+            lampTextMode.SelectedIndex = (int)LampTextEffect.Flash;
+            log.Add("text flashing: " + now());
+            lampTextMode.SelectedIndex = (int)LampTextEffect.Still;
+            log.Add("text still ('" + lampTextMode.SelectedItem + "'): " + now());
+            int place = lampPlace.SelectedIndex;
+            lampPlace.SelectedIndex = 0;
+            log.Add("no strip: " + now());
+            lampPlace.SelectedIndex = place;
+            lampTextMode.SelectedIndex = (int)LampTextEffect.Scroll;
+            lampTextTails.IsChecked = true;
+            lampRows.SelectedIndex = 3;
+            lampTailRows.SelectedIndex = 3;
+            foreach (int k in new[] { 3, 1, 0, 2, 4 })   // 9, 7, 6, 8 and 10 lamps: the choice of 4 for tails comes back
+            {
+                lampRows.SelectedIndex = k;
+                log.Add((k + 6) + " lamps: " + now() + " of " + lampTailRows.Items.Count);
+            }
+            lampColors.SelectedIndex = 1;
+            lampTextMode.SelectedIndex = (int)LampTextEffect.Emerge;
+            log.Add("text fading in ('" + lampTextMode.SelectedItem + "'): " + now());
+            lampTailRows.SelectedIndex = 2;
+            lampScrollSpeed.Value = 175;
+            Apply();
+            log.Add("after Apply: saved " + app.Data.Settings.LampRows + " lamps, tails " + app.Data.Settings.LampTextTails + ", " + app.Data.Settings.LampTailRows + " rows for them, " + app.Data.Settings.LampScrollSpeed + "%, text " + app.Data.Settings.LampTextMode + ", " + app.Data.Settings.LampColors);
+            var look = LookFromControls();
+            log.Add("the look now has " + look.LampRows + " lamps, " + look.LampColors);
+            look.LampRows = 6;
+            look.LampColors = LampColors.RedGreen;
+            PutLook(look);
+            log.Add("a look with 6 lamps chosen: " + now());
+            lampRows.SelectedIndex = 2;
+            look.LampRows = 0;
+            look.LampColors = LampColors.AsIs;
+            PutLook(look);
+            log.Add("a look from before 1.88 chosen with 8 lamps on: " + now());
+            log.Add("not applied, so still saved: " + app.Data.Settings.LampRows + " lamps");
+            return string.Join("\r\n", log);
+        }
+
+        /// <summary>
+        /// Test copies only: picking lamp colors of your own: when they can be ticked, that one always stays ticked, that
+        /// Apply keeps them, and that a saved look brings them along (one from before 1.93 leaves them alone).
+        /// </summary>
+        internal string TestLampColors()
+        {
+            var log = new List<string>();
+            Func<string> now = () => "'" + lampColors.SelectedItem + "', ticked: " + string.Join(" ", HuesPicked) + (lampHues[LampHue.Pink].IsEnabled ? "" : " (off)")
+                + ", pastel " + (lampPastel.IsChecked == true ? "ticked" : "not ticked") + (lampPastel.IsEnabled ? "" : " (off)");
+            log.Add("at first: " + now());
+            lampColors.SelectedIndex = Array.IndexOf(LauncherWindow.ColorChoices, LampColors.Picked);
+            log.Add("your own colors chosen: " + now());
+            lampHues[LampHue.Blue].IsChecked = false;
+            log.Add("the only one cleared: " + now());
+            lampHues[LampHue.White].IsChecked = true;
+            lampHues[LampHue.Gold].IsChecked = true;
+            lampHues[LampHue.Blue].IsChecked = false;
+            log.Add("gold and white ticked, then blue cleared: " + now());
+            Func<string> swatch = () => ((System.Windows.Shapes.Ellipse)((StackPanel)lampHues[LampHue.Red].Content).Children[0]).Fill.ToString();
+            string plain = swatch();
+            lampPastel.IsChecked = true;
+            log.Add("pastel ticked: " + now() + "; red's dot " + plain + " -> " + swatch());
+            Apply();
+            var st = app.Data.Settings;
+            log.Add("after Apply: saved " + st.LampColors + ", " + string.Join(" ", st.LampPicked) + ", pastel " + st.LampPastel);
+            var look = LookFromControls();
+            log.Add("the look has " + look.LampColors + ", " + string.Join(" ", look.LampPicked) + ", pastel " + look.LampPastel);
+            look.LampPicked = new List<LampHue> { LampHue.Purple, LampHue.Cyan };
+            look.LampPastel = false;
+            PutLook(Themes.Copy(look));
+            log.Add("a look with cyan and purple chosen: " + now());
+            look.LampColors = LampColors.ChristmasLights;
+            look.LampPicked = null;
+            PutLook(look);
+            log.Add("a look with the Christmas lights of 1.93 chosen: " + now());
+            look.LampColors = LampColors.AsIs;
+            look.LampPicked = null;
+            PutLook(Themes.Copy(look));
+            log.Add("a look from before 1.93 chosen: " + now());
+            lampColors.SelectedIndex = 0;
+            log.Add("the usual colors chosen: " + now());
+            lampHues[LampHue.Cyan].IsChecked = false;
+            lampHues[LampHue.Purple].IsChecked = false;
+            log.Add("all cleared: " + now());
+            lampColors.SelectedIndex = Array.IndexOf(LauncherWindow.ColorChoices, LampColors.Picked);
+            log.Add("your own chosen again: " + now());
+            Func<string> list = () => now() + "; from the wheel: " + string.Join(" ", customs.Select(c => c.Color + (c.On ? "+" : "-"))) + ", shown " + string.Join(" ", customBoxes.Children.OfType<StackPanel>().Select(x =>
+                ((TextBlock)((StackPanel)((CheckBox)x.Children[0]).Content).Children[1]).Text + (((CheckBox)x.Children[0]).IsChecked == true ? "+" : "-"))) + (customBoxes.IsEnabled ? "" : " (off)") + (addCustom.IsEnabled ? "" : ", can't add");
+            Action<string> wheel = hex => { ColorPickerDialog.TestPick = hex; addCustom.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); };
+            Func<int, int, System.Windows.Controls.Primitives.ButtonBase> part = (k, n) => (System.Windows.Controls.Primitives.ButtonBase)((StackPanel)customBoxes.Children[k]).Children[n];
+            lampColors.SelectedIndex = 0;
+            log.Add("no custom colors: " + list());
+            wheel("");
+            log.Add("wheel canceled: " + list());
+            wheel("#12fa90");
+            log.Add("#12fa90 from the wheel: " + list());
+            lampHues[LampHue.Blue].IsChecked = false;
+            ((CheckBox)part(0, 0)).IsChecked = false;
+            log.Add("blue cleared, then the only one cleared: " + list());
+            wheel("#12FA90");
+            wheel("#FF00AA");
+            log.Add("the same again, then #FF00AA: " + list());
+            ColorPickerDialog.TestPick = "#3355FF";
+            var firstDot = (FrameworkElement)((StackPanel)((CheckBox)((StackPanel)customBoxes.Children[0]).Children[0]).Content).Children[0];
+            var down = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonDownEvent };
+            var up = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent };
+            firstDot.RaiseEvent(down);
+            firstDot.RaiseEvent(up);
+            log.Add("the first one's dot clicked, #3355FF from the wheel (the press " + (down.Handled ? "kept" : "PASSED ON") + ", the release " + (up.Handled ? "kept" : "PASSED ON") + "): " + list());
+            Apply();
+            log.Add("after Apply: saved " + string.Join(" ", st.LampCustom.Select(c => c.Color + (c.On ? "+" : "-"))) + ", " + st.LampColors + ", palette " + LampPalette.From(st));
+            var mine = LookFromControls();
+            DeleteDialog.TestAnswer = false;
+            part(1, 1).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            log.Add("the second one's X, then Cancel (asked about " + DeleteDialog.TestAsked + "): " + list());
+            DeleteDialog.TestAnswer = true;
+            part(1, 1).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            part(0, 1).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            DeleteDialog.TestAnswer = null;
+            log.Add("both deleted: " + list());
+            PutLook(Themes.Copy(mine));
+            log.Add("the look from before, put back: " + list());
+            foreach (var h in new[] { "#000000", "#101010", "#00FF00", "#FFFFFF", "#ABCDEF" }) wheel(h);
+            log.Add("five more: " + list());
+            lampPlace.SelectedIndex = 0;
+            log.Add("no strip: " + list());
+            lampPlace.SelectedIndex = (int)LampPanelPlace.BelowLauncher;
+            Apply();
+            return string.Join("\r\n", log);
+        }
+
+        /// <summary>
         /// A theme was chosen: put its picture and colors into every setting it covers, on every tab, so they show here
         /// and are kept with OK or Apply. Choosing None puts your own look back.
         /// </summary>
@@ -805,7 +1546,9 @@ namespace ReadyLauncher
                 AnimateNotes = animateNotes.IsChecked == true, AnimateSensors = animateSensors.IsChecked == true,
                 AnimateDock = animateDock.IsChecked == true, AnimateVolume = animateVolume.IsChecked == true,
                 LampPanel = (LampPanelPlace)Math.Max(0, lampPlace.SelectedIndex), LampMode = (LampActivity)Math.Max(0, lampMode.SelectedIndex),
-                LampMonitor = (LampMonitorPlace)Math.Max(0, lampMonitor.SelectedIndex)
+                LampCustomActivity = LevelsChosen(),
+                LampMonitor = (LampMonitorPlace)Math.Max(0, lampMonitor.SelectedIndex), LampRows = LampRowsChosen,
+                LampColors = LampColorsChosen, LampPicked = HuesPicked, LampCustom = LampPalette.Tidy(customs), LampPastel = lampPastel.IsChecked == true
             };
         }
 
@@ -843,7 +1586,33 @@ namespace ReadyLauncher
                 animateVolume.IsChecked = l.AnimateVolume;
                 lampPlace.SelectedIndex = Math.Max(0, (int)l.LampPanel);
                 lampMode.SelectedIndex = Math.Max(0, (int)l.LampMode);
+                if (l.LampCustomActivity != null) PutLevels(l.LampCustomActivity.Copy("").Tidy());
                 lampMonitor.SelectedIndex = Math.Max(0, (int)l.LampMonitor);
+                if (l.LampColors != LampColors.AsIs)
+                {
+                    var colors = l.LampColors;
+                    var picked = l.LampPicked;
+                    LampPalette.Retire(ref colors, ref picked);
+                    picked = LampPalette.Tidy(picked);
+                    var wheel = LampPalette.Tidy(l.LampCustom).Where(c => c.On).Select(c => c.Color).ToList();
+                    if (picked.Count + wheel.Count > 0)
+                    {
+                        // The look's colors from the wheel are ticked (ones that aren't on the list join it), any others cleared.
+                        foreach (var c in customs) c.On = wheel.Contains(c.Color);
+                        foreach (var x in wheel) if (customs.All(c => c.Color != x)) customs.Add(new LampCustomColor { Color = x, On = true });
+                        customs = LampPalette.Tidy(customs);
+                        FillCustoms();
+                        customsChanged();
+                    }
+                    if (picked.Count + wheel.Count > 0)   // the new ones first, so there's always at least one
+                    {
+                        foreach (var h in picked) lampHues[h].IsChecked = true;
+                        foreach (var h in LauncherWindow.Hues) if (!picked.Contains(h)) lampHues[h].IsChecked = false;
+                    }
+                    lampPastel.IsChecked = l.LampPastel;
+                    lampColors.SelectedIndex = Array.IndexOf(LauncherWindow.ColorChoices, colors);
+                }
+                if (l.LampRows > 0) lampRows.SelectedIndex = l.LampRows - LampFont.MinRows;
             }
             theme = l.SettingsTheme;
             SettingsTheme.Apply(this, theme);   // this window takes the theme's colors right away
@@ -1109,10 +1878,31 @@ namespace ReadyLauncher
             s.OwnLook = s.Theme.Length > 0 ? ownLook : null;
             s.LampPanel = (LampPanelPlace)Math.Max(0, lampPlace.SelectedIndex);
             s.LampMode = (LampActivity)Math.Max(0, lampMode.SelectedIndex);
+            s.LampCustomActivity = LevelsChosen();
+            s.LampActivities = LampActivityLevels.TidyList(activities);
             s.LampMonitor = (LampMonitorPlace)Math.Max(0, lampMonitor.SelectedIndex);
+            s.LampEightBall = lampEightBall.IsChecked == true;
+            s.LampEightBallInstant = lampEightBallInstant.IsChecked == true;
+            s.LampMonitorForBall = s.LampEightBall && monitorForBall;
+            s.LampColors = LampColorsChosen;
+            s.LampPicked = HuesPicked;
+            s.LampCustom = LampPalette.Tidy(customs);
+            s.LampPastel = lampPastel.IsChecked == true;
+            s.LampRows = LampRowsChosen;
             s.LampText = lampText.Text.Trim();
             s.LampTextMode = s.LampText.Length == 0 ? LampTextEffect.None : (LampTextEffect)Math.Max(0, lampTextMode.SelectedIndex);
             s.LampTextSides = lampTextSides.IsChecked == true;
+            s.LampTextTails = lampTextTails.IsChecked == true;
+            s.LampTailRows = tailRowsWanted;
+            s.LampScrollSpeed = (int)lampScrollSpeed.Value;
+            if (NumberPattern.IsPattern(lampNumbers.Text)) s.LampNumbers = NumberPattern.Tidy(lampNumbers.Text);   // (one that isn't a pattern isn't kept)
+            var hadPatterns = s.LampNumberPatterns;
+            s.LampNumberPatterns = LauncherWindow.TidyPatterns(patterns);
+            foreach (var p in s.LampNumberPatterns)   // clicks on their buttons in the strip's menu while this was open count too
+            {
+                var had = hadPatterns.FirstOrDefault(o => o.Pattern == p.Pattern);
+                if (had != null) p.Clicks = Math.Max(p.Clicks, had.Clicks);
+            }
             AddReminderFromFields();   // text typed for a new reminder but not added yet is kept too
             s.Reminders = reminders.Select(r => new LampReminder { At = r.At, Text = r.Text }).ToList();
 

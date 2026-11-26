@@ -10,8 +10,8 @@ using WF = System.Windows.Forms;
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]
 [assembly: System.Reflection.AssemblyTitle("Ready Launcher")]
 [assembly: System.Reflection.AssemblyProduct("Ready Launcher")]
-[assembly: System.Reflection.AssemblyVersion("1.87.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.87.0.0")]
+[assembly: System.Reflection.AssemblyVersion("2.4.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("2.4.0.0")]
 
 namespace ReadyLauncher
 {
@@ -20,7 +20,8 @@ namespace ReadyLauncher
         /// <summary>The app's name, as shown in window titles, message boxes and the notification area.</summary>
         public const string AppName = "Ready Launcher";
 
-        // A test copy (READYLAUNCHER_DATA set) gets its own instance names so it never talks to the real one.
+        // A test copy (READYLAUNCHER_DATA set, or READYLAUNCHER_TEST_INSTANCE for a portable copy under test) gets its own
+        // instance names so it never talks to the real one.
         internal static readonly string Suffix = TestSuffix();
         internal static readonly string MutexName = @"Local\ReadyLauncher.SingleInstance" + Suffix;
         public static readonly string ShowEventName = @"Local\ReadyLauncher.Show" + Suffix;
@@ -31,6 +32,7 @@ namespace ReadyLauncher
         static string TestSuffix()
         {
             string d = Environment.GetEnvironmentVariable("READYLAUNCHER_DATA");
+            if (string.IsNullOrEmpty(d)) d = Environment.GetEnvironmentVariable("READYLAUNCHER_TEST_INSTANCE");
             return string.IsNullOrEmpty(d) ? "" : ".test" + (d.ToLowerInvariant().GetHashCode() & 0x7fffffff);
         }
 
@@ -338,7 +340,9 @@ namespace ReadyLauncher
                 var w = new SettingsWindow(this) { ShowActivated = false, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.Manual };
                 w.Left = -30000;
                 w.Top = -30000;
-                if (tab == "reminder" || tab == "remindertest") { w.ShowTab(1); w.ShowReminder(); } else w.ShowTab(int.Parse(tab));
+                if (tab == "activity" || tab == "activityview") { w.ShowTab(SettingsWindow.LampStripTab); w.ShowActivity(); }
+                else if (tab == "ball" || tab == "ballview") { w.ShowTab(SettingsWindow.LampStripTab); w.ShowEightBall(); }
+                else if (tab == "reminder" || tab == "remindertest" || tab == "lampsize" || tab == "lampcolors" || tab == "numbers") { w.ShowTab(SettingsWindow.LampStripTab); w.ShowReminder(); } else w.ShowTab(int.Parse(tab));
                 w.Show();
                 var later = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
                 later.Tick += delegate
@@ -349,7 +353,14 @@ namespace ReadyLauncher
                         System.IO.File.WriteAllText(file + ".txt", w.TestReminders());
                         w.UpdateLayout();
                     }
+                    if (tab == "lampsize" || tab == "lampcolors" || tab == "numbers" || tab == "activity" || tab == "ball")
+                    {
+                        System.IO.File.WriteAllText(file + ".txt", tab == "lampsize" ? w.TestLampSize() : tab == "numbers" ? w.TestNumbers() : tab == "activity" ? w.TestLampActivity()
+                            : tab == "ball" ? w.TestEightBall() : w.TestLampColors());
+                        w.UpdateLayout();
+                    }
                     var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(w);
+                    if (Environment.GetEnvironmentVariable("READYLAUNCHER_WORK_HEIGHT") != null) System.IO.File.WriteAllText(file + ".size.txt", "window " + w.ActualHeight + " high, at most " + w.MaxHeight);
                     var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap((int)(w.ActualWidth * dpi.DpiScaleX), (int)(w.ActualHeight * dpi.DpiScaleY),
                         96 * dpi.DpiScaleX, 96 * dpi.DpiScaleY, System.Windows.Media.PixelFormats.Pbgra32);
                     rtb.Render(w);
@@ -382,7 +393,7 @@ namespace ReadyLauncher
         /// <summary>Settings at the lamp strip's reminder.</summary>
         public void OpenReminderSettings()
         {
-            OpenSettings(1);
+            OpenSettings(SettingsWindow.LampStripTab);
             if (settings != null) settings.ShowReminder();
         }
 

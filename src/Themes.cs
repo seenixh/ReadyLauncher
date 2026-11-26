@@ -47,6 +47,9 @@ namespace ReadyLauncher
 
         public static SavedLook Copy(SavedLook a)
         {
+            var lampColors = a.LampColors;
+            var lampPicked = a.LampPicked;
+            LampPalette.Retire(ref lampColors, ref lampPicked);
             return new SavedLook
             {
                 BackgroundColor = a.BackgroundColor, BackgroundImage = a.BackgroundImage, BackgroundImageOff = a.BackgroundImageOff,
@@ -59,7 +62,9 @@ namespace ReadyLauncher
                 Full = a.Full, WindowTransparency = a.WindowTransparency, DockTransparency = a.DockTransparency,
                 Animation = a.Animation, AnimationSpeed = a.AnimationSpeed,
                 AnimateNotes = a.AnimateNotes, AnimateSensors = a.AnimateSensors, AnimateDock = a.AnimateDock, AnimateVolume = a.AnimateVolume,
-                LampPanel = a.LampPanel, LampMode = a.LampMode, LampMonitor = a.LampMonitor
+                LampPanel = a.LampPanel, LampMode = a.LampMode, LampMonitor = a.LampMonitor, LampRows = a.LampRows, LampColors = lampColors,
+                LampPicked = LampPalette.Tidy(lampPicked), LampCustom = LampPalette.Tidy(a.LampCustom), LampPastel = a.LampPastel,
+                LampCustomActivity = a.LampCustomActivity == null ? null : a.LampCustomActivity.Copy("").Tidy()
             };
         }
 
@@ -315,6 +320,7 @@ namespace ReadyLauncher
             l.DockImageTransparency = Clamp(l.DockImageTransparency, 0, 100);
             l.WindowTransparency = Clamp(l.WindowTransparency, 0, 95);
             l.DockTransparency = Clamp(l.DockTransparency, 0, 100);
+            if (l.LampRows < LampFont.MinRows || l.LampRows > LampFont.MaxRows) l.LampRows = 0;
             l.AnimationSpeed = l.AnimationSpeed == 0 ? 100 : Clamp(l.AnimationSpeed, 25, 300);
             l.BackgroundImage = "";
             l.DockBackgroundImage = "";
