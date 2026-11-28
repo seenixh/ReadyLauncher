@@ -49,7 +49,7 @@ namespace ReadyLauncher
         ComboBox lampPatterns;
         Button savePattern, deletePattern;
         List<LampNumberPattern> patterns;   // saved number patterns as edited here; kept with OK or Apply
-        readonly Slider[] customLevel = new Slider[6];   // the custom activity: strip speed and lamps, monitor speed and lamps, red lamps' speed and lamps
+        readonly Slider[] customLevel = new Slider[6];   // the custom activity: strip speed and lamps, monitor speed and lamps, mini lamps' speed and lamps
         Grid customLevelGrid;
         ComboBox lampActivities;
         Button saveActivity, deleteActivity;
@@ -161,6 +161,7 @@ namespace ReadyLauncher
             tabs.Items.Add(new TabItem { Header = "Apps", Content = Scrolling(BuildApps(s)) });
             tabs.Items.Add(new TabItem { Header = "Hardware monitoring", Content = Scrolling(BuildHardware(s)) });
             RestoreIfThemeGone(s);
+            colorsKey = LampColorsKey();   // (so OK keeps saved or random colors from the strip's menu, unless colors are changed here)
 
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(12) };
             var ok = new Button { Content = "OK", Width = 90, IsDefault = true, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(0, 4, 0, 4) };
@@ -708,6 +709,10 @@ namespace ReadyLauncher
             AddRow(g, "Position", lampPlace);
             lampColors = Combo(Array.IndexOf(LauncherWindow.ColorChoices, s.LampColors), LauncherWindow.ColorChoices.Select(LauncherWindow.ColorsText).ToArray());
             AddRow(g, "Lamp colors", lampColors);
+            // Saved colors, or ones picked at random, from the strip's menu: said here, and kept unless colors are chosen here.
+            lampColorsNote = new TextBlock { FontSize = 11.5, Opacity = 0.7, Margin = new Thickness(0, 2, 0, 4), TextWrapping = TextWrapping.Wrap };
+            ShowLampColorsNote(s);
+            AddRow(g, "", lampColorsNote);
             var hueBoxes = new WrapPanel { Margin = new Thickness(0, 3, 0, 0) };
             lampPastel = Check("Pastel (softer colors)", s.LampPastel);
             foreach (var h in LauncherWindow.Hues)
@@ -732,7 +737,7 @@ namespace ReadyLauncher
             addWords.Children.Add(new TextBlock { Text = "\ue790", FontFamily = TileView.IconFont, FontSize = 13, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
             addWords.Children.Add(new TextBlock { Text = "Add a color...", VerticalAlignment = VerticalAlignment.Center });
             addCustom = new Button { Content = addWords, Padding = new Thickness(10, 2, 10, 2), Margin = new Thickness(0, 2, 0, 2), HorizontalAlignment = HorizontalAlignment.Left,
-                                     ToolTip = "Pick any color from a color wheel for the lamps (up to " + LampPalette.MaxCustom + " of them)" };
+                                     ToolTip = "Pick any color from a color wheel for the lamps" };
             addCustom.Click += delegate { PickCustom(null); };
             var customLine = new StackPanel();
             customLine.Children.Add(customBoxes);
@@ -752,8 +757,11 @@ namespace ReadyLauncher
             lampMode = Combo((int)s.LampMode, "Standby (slowest, few lamps lit)", "Idle (slow, few lamps lit)", "Computing", "Alert (busier, with a sweep of light)",
                              LauncherWindow.RandomLampsText, LauncherWindow.CustomLampsText);
             AddRow(g, "Lamp activity", lampMode);
+            lampActivityNote = new TextBlock { FontSize = 11.5, Opacity = 0.7, Margin = new Thickness(0, 2, 0, 4), TextWrapping = TextWrapping.Wrap };
+            ShowLampActivityNote(s);
+            AddRow(g, "", lampActivityNote);
 
-            // Your own activity: how quick, and how many lit, for the strip's lamps, the monitor's lamps and its small red
+            // Your own activity: how quick, and how many lit, for the strip's lamps, the monitor's lamps and its mini
             // lamps; and ones saved under a name. Moving a slider chooses Custom above.
             var levels = s.LampCustomActivity ?? new LampActivityLevels();
             customLevelGrid = new Grid { Margin = new Thickness(0, 2, 0, 2), HorizontalAlignment = HorizontalAlignment.Left };
@@ -763,7 +771,7 @@ namespace ReadyLauncher
             Action<UIElement, int, int> place = (e, r, col) => { Grid.SetRow(e, r); Grid.SetColumn(e, col); customLevelGrid.Children.Add(e); };
             place(new TextBlock { Text = "Speed", Opacity = 0.7, FontSize = 11.5 }, 0, 1);
             place(new TextBlock { Text = "Lamps lit", Opacity = 0.7, FontSize = 11.5 }, 0, 3);
-            string[] levelParts = { "Lamp strip", "Monitor lamps", "Monitor red lamps" };
+            string[] levelParts = { "Lamp strip", "Monitor lamps", "Monitor mini lamps" };
             int[] levelNow = { levels.StripSpeed, levels.StripLamps, levels.MonitorSpeed, levels.MonitorLamps, levels.LedSpeed, levels.LedLamps };
             for (int k = 0; k < 6; k++)
             {
@@ -956,7 +964,7 @@ namespace ReadyLauncher
                 bool strip = lampPlace.SelectedIndex != (int)LampPanelPlace.Off;
                 lampMode.IsEnabled = lampRows.IsEnabled = lampColors.IsEnabled = lampPastel.IsEnabled = strip;
                 hueBoxes.IsEnabled = customBoxes.IsEnabled = strip && LampColorsChosen == LampColors.Picked;
-                addCustom.IsEnabled = strip && customs.Count < LampPalette.MaxCustom;
+                addCustom.IsEnabled = strip;
                 lampTextTails.IsEnabled = strip && LampFont.TailRowsFor(LampRowsChosen) > 0;
                 FillTailRows();
                 lampTailRows.IsEnabled = lampTextTails.IsEnabled && lampTextTails.IsChecked == true;
@@ -1101,7 +1109,7 @@ namespace ReadyLauncher
                 bool strip = customLevelGrid.IsEnabled;
                 lampActivities.IsEnabled = activities.Count > 0 && strip;
                 deleteActivity.IsEnabled = lampActivities.SelectedIndex >= 0 && strip;
-                saveActivity.IsEnabled = strip && (activities.Count < LampActivityLevels.MaxSaved || lampActivities.SelectedIndex >= 0);
+                saveActivity.IsEnabled = strip;
             }
             finally { fillingActivities = false; }
         }
@@ -1803,6 +1811,55 @@ namespace ReadyLauncher
             return false;
         }
 
+        TextBlock lampColorsNote, lampActivityNote;
+        string colorsKey;   // the colors chosen here, as Settings opened (or was last applied)
+
+        /// <summary>The colors chosen on the Lamp strip tab, in a line: to see whether they've been changed.</summary>
+        string LampColorsKey()
+        {
+            return LampColorsChosen + "|" + string.Join(",", HuesPicked) + "|" + string.Join(",", customs.Select(c => c.Color + (c.On ? "+" : "-")));
+        }
+
+        /// <summary>Saved colors or random ones in use (chosen in the strip's menu), said under the colors here.</summary>
+        void ShowLampColorsNote(AppSettings s)
+        {
+            string text = null;
+            if (s.LampColorList.Count > 0)
+            {
+                var set = s.LampColorsAtRandom ? null : s.LampColorSets.FirstOrDefault(o => o.List().Count == s.LampColorList.Count && !o.List().Except(s.LampColorList).Any());
+                text = "The lamps have " + (s.LampColorsAtRandom ? "colors picked at random" : set != null ? "your saved colors \u201c" + set.Name + "\u201d" : "saved colors")
+                    + " now, chosen in the strip's right-click menu (Activity & Colors). Choosing colors here puts these in their place.";
+            }
+            if (s.LampRandomColors != LampRandomColors.None)
+                text = (text == null ? "" : text + " ") + "New colors are picked at random each time the launcher opens, until colors are chosen here or in that menu.";
+            var own = new List<string>();
+            if (s.LampStripColors.Count > 0) own.Add("the strip");
+            if (s.LampMonitorColors.Count > 0) own.Add("the monitor's lamps");
+            if (s.LampMiniColors.Count > 0) own.Add("its mini lamps");
+            var thirdsOwn = new[] { "left", "middle", "right" }.Where((w, k) => (k == 0 ? s.LampLeftColors : k == 1 ? s.LampMiddleColors : s.LampRightColors).Count > 0).ToList();
+            if (thirdsOwn.Count > 0) own.Add("the strip's " + string.Join(" and ", thirdsOwn) + (thirdsOwn.Count == 1 ? " third" : " thirds"));
+            if (own.Count > 0)
+                text = (text == null ? "" : text + " ") + "Colors of their own (chosen by right-clicking a color in that menu): "
+                    + (own.Count == 1 ? own[0] : string.Join(", ", own.Take(own.Count - 1)) + " and " + own[own.Count - 1]) + ".";
+            lampColorsNote.Text = text ?? "";
+            lampColorsNote.Visibility = text == null ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        /// <summary>Random activity, when it's on (in the strip's menu), said under the activity here.</summary>
+        void ShowLampActivityNote(AppSettings s)
+        {
+            var parts = new List<string>();
+            if ((s.LampActivityParts & LampActivityParts.Strip) != 0) parts.Add("the strip's lamps");
+            if ((s.LampActivityParts & LampActivityParts.Monitor) != 0) parts.Add("the monitor's lamps");
+            if ((s.LampActivityParts & LampActivityParts.Red) != 0) parts.Add("its mini lamps");
+            string which = parts.Count <= 1 ? string.Join("", parts) : string.Join(", ", parts.Take(parts.Count - 1)) + " and " + parts[parts.Count - 1];
+            lampActivityNote.Text = s.LampRandomActivity
+                ? "Random activity is on (in the strip's right-click menu, Activity & Colors): each time the launcher opens, " + which
+                  + " get a speed and a number lit, picked at random. Choosing another activity here switches it off."
+                : "";
+            lampActivityNote.Visibility = s.LampRandomActivity ? Visibility.Visible : Visibility.Collapsed;
+        }
+
         bool closingAfterOk, quietFailures;
         /// <summary>Test copies only: why the test's OK couldn't apply the settings (no message is shown then).</summary>
         internal string TestFailure;
@@ -1929,12 +1986,21 @@ namespace ReadyLauncher
             s.OwnLook = s.Theme.Length > 0 ? ownLook : null;
             s.LampPanel = (LampPanelPlace)Math.Max(0, lampPlace.SelectedIndex);
             s.LampMode = (LampActivity)Math.Max(0, lampMode.SelectedIndex);
+            if (s.LampMode != LampActivity.Custom) s.LampRandomActivity = false;   // another activity chosen: it stays
             s.LampCustomActivity = LevelsChosen();
             s.LampActivities = LampActivityLevels.TidyList(activities);
             s.LampMonitor = (LampMonitorPlace)Math.Max(0, lampMonitor.SelectedIndex);
             s.LampEightBall = lampEightBall.IsChecked == true;
             s.LampEightBallInstant = lampEightBallInstant.IsChecked == true;
             s.LampMonitorForBall = s.LampEightBall && monitorForBall;
+            string colorsNow = LampColorsKey();
+            if (colorsKey != null && colorsNow != colorsKey)   // colors chosen here: saved or random ones from the strip's menu go
+            {
+                s.LampColorList.Clear();
+                s.LampColorsAtRandom = false;
+                s.LampRandomColors = LampRandomColors.None;
+            }
+            colorsKey = colorsNow;
             s.LampColors = LampColorsChosen;
             s.LampPicked = HuesPicked;
             s.LampCustom = LampPalette.Tidy(customs);
@@ -1988,6 +2054,8 @@ namespace ReadyLauncher
                 s.AutoBackupFolder = string.Equals(backupFolder.TrimEnd('\\'), AppSettings.DefaultBackupFolder, StringComparison.OrdinalIgnoreCase) ? "" : backupFolder;
             ApplyHardware(s);
 
+            ShowLampColorsNote(s);
+            ShowLampActivityNote(s);
             app.SettingsChanged(startup.IsChecked == true, resize);
             Themes.CleanUpPictures(s);   // copies made for your own themes that nothing uses any more
             if (s.AutoBackup)

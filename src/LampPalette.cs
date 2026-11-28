@@ -26,9 +26,6 @@ namespace ReadyLauncher
         static readonly List<string> names = new List<string>();
         static readonly Dictionary<string, int> wheelNumbers = new Dictionary<string, int>();   // colors from the wheel that have been used
 
-        /// <summary>How many colors from the wheel can be kept.</summary>
-        public const int MaxCustom = 6;
-
 
         /// <summary>How many looks there are, pastel ones included (more as colors from the wheel are used).</summary>
         public static int Count { get { return shades.Count; } }
@@ -135,6 +132,8 @@ namespace ReadyLauncher
         /// <summary>The colors chosen in the settings.</summary>
         public static LampPalette From(AppSettings s)
         {
+            var listed = s.LampColorList == null ? new List<string>() : TidyList(s.LampColorList);
+            if (listed.Count > 0) return new LampPalette(listed.Select(e => EntryNumber(e)).ToArray(), s.LampPastel);   // saved colors, or ones picked at random
             switch (s.LampColors)
             {
                 case LampColors.Picked:
@@ -142,6 +141,31 @@ namespace ReadyLauncher
                     return new LampPalette(picked.Length == 0 ? null : picked, s.LampPastel);
                 default: return new LampPalette(null, s.LampPastel);
             }
+        }
+
+        /// <summary>The lamp strip's colors: its own (chosen in the strip's menu), or those of all the lamps.</summary>
+        public static LampPalette ForStrip(AppSettings s) { return Own(s.LampStripColors, s.LampPastel) ?? From(s); }
+
+        /// <summary>The monitor's lamps' colors: their own (chosen in the strip's menu), or those of all the lamps.</summary>
+        public static LampPalette ForMonitor(AppSettings s) { return Own(s.LampMonitorColors, s.LampPastel) ?? From(s); }
+
+        /// <summary>The strip's left, middle and right thirds' own colors (null for a third without: it has the strip's).</summary>
+        public static LampPalette[] ForThirds(AppSettings s)
+        {
+            return new[] { Own(s.LampLeftColors, s.LampPastel), Own(s.LampMiddleColors, s.LampPastel), Own(s.LampRightColors, s.LampPastel) };
+        }
+
+        static LampPalette Own(List<string> colors, bool pastel)
+        {
+            var listed = colors == null ? new List<string>() : TidyList(colors);
+            return listed.Count == 0 ? null : new LampPalette(listed.Select(e => EntryNumber(e)).ToArray(), pastel);
+        }
+
+        /// <summary>The monitor's mini lamps' colors, as they look lit (null: the usual red).</summary>
+        public static Color[] ForMini(AppSettings s)
+        {
+            var listed = s.LampMiniColors == null ? new List<string>() : TidyList(s.LampMiniColors);
+            return listed.Count == 0 ? null : listed.Select(e => EntrySwatch(e, s.LampPastel)).ToArray();
         }
 
         /// <summary>
@@ -156,6 +180,88 @@ namespace ReadyLauncher
             colors = LampColors.Picked;
         }
 
+        /// <summary>
+        /// A list of colors as it's kept: each a ready-made one by its name ("Blue") or another as "#RRGGBB", each once, in
+        /// the order given; anything that isn't a color left out.
+        /// </summary>
+        public static List<string> TidyList(IEnumerable<string> colors)
+        {
+            var list = new List<string>();
+            foreach (var c in colors ?? new string[0])
+            {
+                string e = Entry(c);
+                if (e != null && !list.Contains(e)) list.Add(e);
+            }
+            return list;
+        }
+
+        /// <summary>A color in a list as it's kept, or null when it isn't one.</summary>
+        static string Entry(string c)
+        {
+            c = (c ?? "").Trim();
+            if (c.Length == 0) return null;
+            LampHue h;
+            if (!c.StartsWith("#") && Enum.TryParse(c, true, out h) && Enum.IsDefined(typeof(LampHue), h)) return h.ToString();
+            return c.StartsWith("#") ? Hex(c) : null;
+        }
+
+        static int EntryNumber(string e)
+        {
+            LampHue h;
+            return !e.StartsWith("#") && Enum.TryParse(e, true, out h) ? Number(h) : Number(e);
+        }
+
+        /// <summary>A color in a list, as it looks lit.</summary>
+        public static Color EntrySwatch(string e, bool pastel) { return Lit(2 * EntryNumber(e) + (pastel ? 1 : 0)); }
+
+        /// <summary>
+        /// Colors from anywhere on the color wheel, bright enough for lamps, as "#RRGGBB": <paramref name="count"/> of them
+        /// (always that many), well apart from each other: 40 degrees of the wheel, or as far as that many will go, closer
+        /// only if they have to. Each is one of 144 (72 hues, two strengths), so the colors used stay few.
+        /// </summary>
+        public static List<string> RandomColors(int count, Random rnd)
+        {
+            count = Math.Max(1, Math.Min(72, count));
+            var slots = Enumerable.Range(0, 72).Select(i => i * 5).OrderBy(h => rnd.Next()).ToList();   // the 72 hues, in a random order
+            var hues = new List<int>();
+            for (int apart = Math.Min(40, 300 / count); ; apart -= 5)
+            {
+                hues.Clear();
+                foreach (int h in slots)
+                {
+                    if (hues.All(o => Math.Min(Math.Abs(o - h), 360 - Math.Abs(o - h)) >= apart)) hues.Add(h);
+                    if (hues.Count == count) break;
+                }
+                if (hues.Count == count || apart <= 5) break;
+            }
+            return hues.Select(h => FromHue(h, rnd.Next(2) == 0 ? 0.75 : 1.0)).ToList();
+        }
+
+        /// <summary>Test copies only: a color's hue on the wheel, 0 to 360.</summary>
+        internal static double HueOf(string hex)
+        {
+            var c = (Color)ColorConverter.ConvertFromString(hex);
+            double r = c.R / 255.0, g = c.G / 255.0, b = c.B / 255.0, max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b)), d = max - min;
+            if (d == 0) return 0;
+            double h = max == r ? (g - b) / d % 6 : max == g ? (b - r) / d + 2 : (r - g) / d + 4;
+            return (h * 60 + 360) % 360;
+        }
+
+        /// <summary>A color of that hue (0 to 360) and strength (how far from white), at full brightness, as "#RRGGBB".</summary>
+        static string FromHue(int hue, double strength)
+        {
+            double h = hue / 60.0, x = 1 - Math.Abs(h % 2 - 1);
+            double r, g, b;
+            if (h < 1) { r = 1; g = x; b = 0; }
+            else if (h < 2) { r = x; g = 1; b = 0; }
+            else if (h < 3) { r = 0; g = 1; b = x; }
+            else if (h < 4) { r = 0; g = x; b = 1; }
+            else if (h < 5) { r = x; g = 0; b = 1; }
+            else { r = 1; g = 0; b = x; }
+            Func<double, int> v = c => (int)Math.Round(255 * (1 - strength * (1 - c)));
+            return string.Format("#{0:X2}{1:X2}{2:X2}", v(r), v(g), v(b));
+        }
+
         /// <summary>Picked colors in their usual order, each once.</summary>
         public static List<LampHue> Tidy(IEnumerable<LampHue> picked)
         {
@@ -163,7 +269,7 @@ namespace ReadyLauncher
             return picked == null ? new List<LampHue>() : all.Where(h => picked.Contains(h)).ToList();
         }
 
-        /// <summary>Colors from the wheel: each once, and no more than can be kept (ones ticked first).</summary>
+        /// <summary>Colors from the wheel: each once (as many as you like).</summary>
         public static List<LampCustomColor> Tidy(IEnumerable<LampCustomColor> custom)
         {
             var list = new List<LampCustomColor>();
@@ -175,7 +281,6 @@ namespace ReadyLauncher
                 if (same != null) same.On |= c.On;
                 else list.Add(new LampCustomColor { Color = hex, On = c.On });
             }
-            while (list.Count > MaxCustom) list.Remove(list.FirstOrDefault(c => !c.On) ?? list[list.Count - 1]);
             return list;
         }
 

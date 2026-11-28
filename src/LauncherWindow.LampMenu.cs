@@ -38,8 +38,7 @@ namespace ReadyLauncher
             items.Add(Heading("Strip"));
             items.Add(LampPlaceMenu());
             items.Add(LampHeightMenu());
-            items.Add(LampColorsMenu());
-            items.Add(LampActivityMenu());
+            items.Add(LampLooksMenu());
             items.Add(LampMonitorMenu());
 
             items.Add(new Separator());
@@ -176,93 +175,6 @@ namespace ReadyLauncher
             return c == LampColors.Picked ? "Your own colors" : "Red and amber (the usual)";
         }
 
-        /// <summary>The colors in use, in a few words: "Blue, pastel".</summary>
-        string ColorsNow()
-        {
-            string text = S.LampColors != LampColors.Picked ? "Red and amber"
-                : LampColorsTicked > 1 ? LampColorsTicked + " colors"
-                : S.LampPicked.Count == 1 ? S.LampPicked[0].ToString() : S.LampCustom.Where(c => c.On).Select(c => c.Color).FirstOrDefault() ?? "Red and amber";
-            return text + (S.LampPastel ? ", pastel" : "");
-        }
-
-        /// <summary>The ready-made colors, your own (ticking any of them), and pastel; the strip changes as you tick.</summary>
-        MenuItem LampColorsMenu()
-        {
-            var menu = SubMenu("Colors", "", "");
-            var sets = new Dictionary<LampColors, MenuItem>();
-            var hues = new Dictionary<LampHue, MenuItem>();
-            var custom = new Dictionary<LampCustomColor, MenuItem>();
-            var customDots = new Dictionary<LampCustomColor, System.Windows.Shapes.Ellipse>();
-            MenuItem pastel = null;
-            Action marks = () =>
-            {
-                foreach (var kv in sets) kv.Value.IsChecked = S.LampColors == kv.Key;
-                foreach (var kv in hues)
-                {
-                    kv.Value.IsChecked = S.LampPicked.Contains(kv.Key);
-                    kv.Value.HeaderTemplate = DotTemplate(LampPalette.Swatch(kv.Key, S.LampPastel));
-                }
-                foreach (var kv in custom)
-                {
-                    kv.Value.IsChecked = kv.Key.On;
-                    customDots[kv.Key].Fill = new SolidColorBrush(LampPalette.Swatch(kv.Key.Color, S.LampPastel));
-                }
-                pastel.IsChecked = S.LampPastel;
-                menu.InputGestureText = ColorsNow();
-            };
-            foreach (var c in ColorChoices)
-            {
-                var one = c;
-                sets[one] = Item(ColorsText(one), () =>
-                {
-                    S.LampColors = one;
-                    if (one == LampColors.Picked && LampColorsTicked == 0) S.LampPicked.Add(LampHue.Blue);   // something to start from
-                    ApplyLampColors();
-                    marks();
-                });
-                if (one == LampColors.Picked) Into(menu, new Separator());
-                Into(menu, sets[one]);
-            }
-            sets[LampColors.Picked].StaysOpenOnClick = true;
-            sets[LampColors.Picked].ToolTip = "Tick one color for all the lamps, or as many as you like";
-            foreach (var h in Hues)
-            {
-                var one = h;
-                hues[one] = Item(one.ToString(), () => { PickLampHue(one); marks(); });
-                hues[one].StaysOpenOnClick = true;
-                Into(menu, hues[one]);
-            }
-            foreach (var c in S.LampCustom)   // ones from the color wheel: click to tick, the dot to change it, the X to delete it
-            {
-                var one = c;
-                var mi = Item(one.Color, () => { TickLampCustom(one); marks(); });
-                mi.StaysOpenOnClick = true;
-                mi.Tag = one.Color;
-                System.Windows.Shapes.Ellipse dot;
-                var change = ClickableDot(LampPalette.Swatch(one.Color, S.LampPastel), "Change this color with the color wheel", out dot, () => AfterMenu(mi, () => PickLampCustom(one)));
-                var delete = DeleteMark(() => AfterMenu(mi, () => DeleteLampCustom(one)));
-                var head = new DockPanel { LastChildFill = true };
-                DockPanel.SetDock(delete, Dock.Right);
-                head.Children.Add(delete);
-                head.Children.Add(change);
-                head.Children.Add(new TextBlock { Text = one.Color, VerticalAlignment = VerticalAlignment.Center });
-                mi.Header = head;
-                custom[one] = mi;
-                customDots[one] = dot;
-                Into(menu, mi);
-            }
-            var add = Item("Add a custom color...", () => PickLampCustom(null), false, "\ue790");
-            add.ToolTip = "Choose any color from a color wheel (up to " + LampPalette.MaxCustom + " of them)";
-            if (S.LampCustom.Count >= LampPalette.MaxCustom) TurnOff(add, "You have " + LampPalette.MaxCustom + " custom colors, the most there can be: click a color's dot to change it, or its X to delete it");
-            Into(menu, add);
-            Into(menu, new Separator());
-            pastel = Item("Pastel (softer colors)", () => { S.LampPastel = !S.LampPastel; ApplyLampColors(); marks(); });
-            pastel.StaysOpenOnClick = true;
-            Into(menu, pastel);
-            marks();
-            return menu;
-        }
-
         /// <summary>
         /// A dot of a color that does something of its own when clicked (rather than being a click on the menu entry or
         /// checkbox it's in).
@@ -369,110 +281,9 @@ namespace ReadyLauncher
         {
             if (S.LampMode == LampActivity.Random) return "Randomize";
             if (S.LampMode != LampActivity.Custom) return S.LampMode.ToString();
+            if (DefaultActivityInUse) return "Default";
             var saved = S.LampActivities.FirstOrDefault(a => a.SameAs(S.LampCustomActivity));
             return saved != null ? Shorten(saved.Name, 22) : "Custom";
-        }
-
-        /// <summary>
-        /// How busy the lamps are: standby, idle, computing, alert, randomize, or your own. For your own, sliders set how
-        /// quick the strip's lamps, the monitor's lamps and its small red lamps are, and how many are lit, and the lamps
-        /// change as they move (the menu stays open). Saved ones: click one to use it, its X to delete it. It opens high,
-        /// so it doesn't cover the monitor.
-        /// </summary>
-        MenuItem LampActivityMenu()
-        {
-            var menu = SubMenu("Activity", "", ActivityNow());
-            var choices = new Dictionary<LampActivity, MenuItem>();
-            var saved = new Dictionary<LampActivityLevels, MenuItem>();
-            var sliders = new Dictionary<string, Slider>();
-            Action marks = () =>
-            {
-                foreach (var kv in choices) kv.Value.IsChecked = S.LampMode == kv.Key;
-                foreach (var kv in saved) kv.Value.IsChecked = S.LampMode == LampActivity.Custom && kv.Key.SameAs(S.LampCustomActivity);
-                menu.InputGestureText = ActivityNow();
-            };
-            Action<LampActivity, string> choice = (a, text) =>
-            {
-                choices[a] = Choice(text, S.LampMode == a, () => SetLampActivity(a));
-                Into(menu, choices[a]);
-            };
-            choice(LampActivity.Standby, "Standby (slowest, few lamps lit)");
-            choice(LampActivity.Idle, "Idle (slow, few lamps lit)");
-            choice(LampActivity.Computing, "Computing");
-            choice(LampActivity.Alert, "Alert (busier, with a sweep of light)");
-            choice(LampActivity.Random, RandomLampsText);
-            choices[LampActivity.Random].ToolTip = "Switches between standby, idle, computing and alert on its own, every 20 to 60 seconds";
-
-            // Your own: the lamps change as the sliders move.
-            Into(menu, new Separator());
-            var custom = Item(CustomLampsText, () => { SetLampActivity(LampActivity.Custom); marks(); }, S.LampMode == LampActivity.Custom, null);
-            custom.StaysOpenOnClick = true;
-            custom.ToolTip = "Your own activity: how quick the lamps are, and how many of them are lit. The lamps change as you move the sliders.";
-            choices[LampActivity.Custom] = custom;
-            Into(menu, custom);
-            Action<string> part = words => Into(menu, new TextBlock { Text = words, Margin = new Thickness(0, 5, 0, 0) });
-            Action<string, int, int, string, string, Action<int>> slider = (tag, value, most, unit, word, set) =>
-            {
-                var mi = SliderEntry(tag, value, most == 100 ? 0 : LampActivityLevels.MinSpeed, most, unit, word, most == 100 ? LampsTip : SpeedTip, v =>
-                {
-                    set(v);
-                    CustomLevelChanged();
-                    marks();
-                });
-                sliders[tag] = (Slider)((FrameworkElement)mi.Header).Tag;
-                Into(menu, mi);
-            };
-            int fastest = LampActivityLevels.MaxSpeed;
-            var now = S.LampCustomActivity;
-            part("Lamp strip");
-            slider("Strip speed", now.StripSpeed, fastest, "", "Speed", v => S.LampCustomActivity.StripSpeed = v);
-            slider("Strip lamps", now.StripLamps, 100, "%", "Lamps", v => S.LampCustomActivity.StripLamps = v);
-            part("Monitor lamps");
-            slider("Monitor speed", now.MonitorSpeed, fastest, "", "Speed", v => S.LampCustomActivity.MonitorSpeed = v);
-            slider("Monitor lamps", now.MonitorLamps, 100, "%", "Lamps", v => S.LampCustomActivity.MonitorLamps = v);
-            part("Monitor red lamps");
-            slider("Red speed", now.LedSpeed, fastest, "", "Speed", v => S.LampCustomActivity.LedSpeed = v);
-            slider("Red lamps", now.LedLamps, 100, "%", "Lamps", v => S.LampCustomActivity.LedLamps = v);
-
-            // Saved ones: clicking one puts it on the sliders, and the lamps (the menu stays open); its X deletes it.
-            Into(menu, new Separator());
-            if (S.LampActivities.Count > 0) Into(menu, Heading("Saved activities: click one to use it"));
-            foreach (var a in S.LampActivities)
-            {
-                var one = a;
-                MenuItem mi = null;
-                mi = Item(one.Name, () =>
-                {
-                    sliders["Strip speed"].Value = one.StripSpeed;
-                    sliders["Strip lamps"].Value = one.StripLamps;
-                    sliders["Monitor speed"].Value = one.MonitorSpeed;
-                    sliders["Monitor lamps"].Value = one.MonitorLamps;
-                    sliders["Red speed"].Value = one.LedSpeed;
-                    sliders["Red lamps"].Value = one.LedLamps;
-                    SetLampActivity(LampActivity.Custom);
-                    marks();
-                }, false, null);
-                mi.StaysOpenOnClick = true;
-                mi.Tag = one.Name;
-                mi.ToolTip = one.Summary();
-                var head = new DockPanel { LastChildFill = true };
-                var delete = DeleteMark(() => AfterMenu(mi, () => DeleteLampActivity(one)));
-                ((FrameworkElement)delete).ToolTip = "Delete this saved activity";
-                DockPanel.SetDock(delete, Dock.Right);
-                head.Children.Add(delete);
-                head.Children.Add(new TextBlock { Text = Shorten(one.Name, 34), VerticalAlignment = VerticalAlignment.Center });
-                mi.Header = head;
-                saved[one] = mi;
-                Into(menu, mi);
-            }
-            var save = Item("Save this custom activity...", SaveLampActivity, false, "\ue74e");
-            save.ToolTip = "Keep the sliders' settings under a name, to use again later";
-            if (S.LampActivities.Count >= LampActivityLevels.MaxSaved && !S.LampActivities.Any(o => o.SameAs(S.LampCustomActivity)))
-                TurnOff(save, "You have " + LampActivityLevels.MaxSaved + " saved activities, the most there can be: delete one first");
-            Into(menu, save);
-            marks();
-            OpenHigh(menu);
-            return menu;
         }
 
         System.Windows.Threading.DispatcherTimer saveSoon;
@@ -507,6 +318,7 @@ namespace ReadyLauncher
             if (name == null) return;
             S.LampActivities = LampActivityLevels.Save(S.LampActivities, name, levels);
             app.Save();
+            showLine = "activity:" + name.Trim();
             SetLampActivity(LampActivity.Custom);
         }
 
@@ -568,10 +380,11 @@ namespace ReadyLauncher
         }
 
         /// <summary>
-        /// Opens <paramref name="sub"/>'s submenu high: its top level with the top of the whole menu rather than with its
-        /// entry, and higher still if it would cover the lamp monitor (as far as the screen goes).
+        /// <paramref name="sub"/>'s submenu keeps clear of the lamps (the strip's, and the monitor with its cabinet), so you
+        /// can see them change as you choose: above them, or below them if there isn't room above. With
+        /// <paramref name="high"/>, it also opens high: its top level with the top of the whole menu rather than with its entry.
         /// </summary>
-        void OpenHigh(MenuItem sub)
+        void OpenClear(MenuItem sub, bool high)
         {
             System.Windows.Controls.Primitives.Popup hooked = null;
             Action place = () =>
@@ -585,23 +398,97 @@ namespace ReadyLauncher
                 if (hooked != popup)
                 {
                     hooked = popup;
-                    popup.Opened += delegate { Dispatcher.BeginInvoke(new Action(() => { if (sub.IsSubmenuOpen) PlaceHigh(popup, anchor, root, child); }), System.Windows.Threading.DispatcherPriority.Loaded); };
+                    popup.Opened += delegate { Dispatcher.BeginInvoke(new Action(() => { if (sub.IsSubmenuOpen) PlaceClear(popup, anchor, root, child, high); }), System.Windows.Threading.DispatcherPriority.Loaded); };
                 }
-                PlaceHigh(popup, anchor, root, child);
+                PlaceClear(popup, anchor, root, child, high);
             };
             sub.SubmenuOpened += (s, e) => { if (e.OriginalSource == sub) place(); };
         }
 
-        void PlaceHigh(System.Windows.Controls.Primitives.Popup popup, FrameworkElement anchor, ContextMenu root, FrameworkElement child)
+        void PlaceClear(System.Windows.Controls.Primitives.Popup popup, FrameworkElement anchor, ContextMenu root, FrameworkElement child, bool high)
         {
             child.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             Size size = child.ActualHeight > 0 ? new Size(child.ActualWidth, child.ActualHeight) : child.DesiredSize;
             Rect a = ScreenRect(anchor), m = ScreenRect(root);
             var usual = new Rect(a.Right + popup.HorizontalOffset, a.Top, size.Width, size.Height);
-            Rect? monitor = null;
-            if (lampWindow != null && lampWindow.Monitor != null && lampWindow.Monitor.IsVisible && PresentationSource.FromVisual(lampWindow.Monitor) != null)
-                monitor = ScreenRect(lampWindow.Monitor);
-            popup.VerticalOffset = HighSubmenuOffset(m.Top, usual, monitor);
+            popup.VerticalOffset = ClearSubmenuOffset(high ? Math.Min(0, m.Top - usual.Top) : UsualSubmenuOffset, usual, LampsArea(), WorkAreaAt(a.TopLeft));
+        }
+
+        /// <summary>How far down a submenu usually opens from its entry's top (as the menus' look has it).</summary>
+        const double UsualSubmenuOffset = -5;
+
+        /// <summary>
+        /// How far to move a submenu from its entry (<paramref name="usual"/>: beside it, its top level with the entry's),
+        /// starting from <paramref name="start"/>, so it doesn't cover <paramref name="keepClear"/>: up until it's just
+        /// above it, or down until it's just below it if there isn't room above in <paramref name="work"/> (the screen
+        /// less the taskbar). With room for neither, as high as it goes; the popup itself keeps it on the screen.
+        /// </summary>
+        internal static double ClearSubmenuOffset(double start, Rect usual, Rect? keepClear, Rect work)
+        {
+            var placed = usual;
+            placed.Offset(0, start);
+            if (!keepClear.HasValue) return start;
+            var k = keepClear.Value;
+            if (placed.Bottom <= k.Top || placed.Top >= k.Bottom) return start;   // clear of them already
+            if (k.Top - work.Top >= placed.Height || work.Bottom - k.Bottom < placed.Height) return start - (placed.Bottom - k.Top);
+            return start + (k.Bottom - placed.Top);
+        }
+
+        /// <summary>
+        /// Where a menu of <paramref name="size"/> opened at <paramref name="at"/> goes to leave <paramref name="keepClear"/>
+        /// in sight: just above it, or just below it if there isn't room above; null (where it was opened) if it fits
+        /// neither way, or there's nothing to keep clear of. Its left edge stays where it was opened, if the screen allows.
+        /// </summary>
+        internal static Point? ClearMenuPlace(Size size, Point at, Rect? keepClear, Rect work)
+        {
+            if (!keepClear.HasValue) return null;
+            var k = keepClear.Value;
+            double x = Math.Max(work.Left, Math.Min(at.X, work.Right - size.Width));
+            if (k.Top - work.Top >= size.Height) return new Point(x, k.Top - size.Height);
+            if (work.Bottom - k.Bottom >= size.Height) return new Point(x, k.Bottom);
+            return null;
+        }
+
+        /// <summary>
+        /// Where the lamps are on the screen, in device-independent pixels: the strip, and the monitor with its cabinet
+        /// (all of the window they're in, outside the launcher), and lamps in the launcher or the quick launch strip.
+        /// Null when none are showing.
+        /// </summary>
+        Rect? LampsArea()
+        {
+            Rect? area = null;
+            Action<FrameworkElement> add = e =>
+            {
+                if (e == null || !e.IsVisible || PresentationSource.FromVisual(e) == null) return;
+                var r = ScreenRect(e);
+                area = area.HasValue ? Rect.Union(area.Value, r) : r;
+            };
+            if (lampWindow != null && lampWindow.IsVisible) add(lampWindow.Content as FrameworkElement);
+            foreach (var p in LampPanel.OnScreen) add(p);
+            return area;
+        }
+
+        /// <summary>The work area (the screen less the taskbar) of the screen a point is on, in device-independent pixels.</summary>
+        Rect WorkAreaAt(Point dip)
+        {
+            var src = PresentationSource.FromVisual(this);
+            if (src == null || src.CompositionTarget == null) return SystemParameters.WorkArea;
+            var px = src.CompositionTarget.TransformToDevice.Transform(dip);
+            var wa = System.Windows.Forms.Screen.FromPoint(new System.Drawing.Point((int)px.X, (int)px.Y)).WorkingArea;
+            var fromDevice = src.CompositionTarget.TransformFromDevice;
+            return new Rect(fromDevice.Transform(new Point(wa.Left, wa.Top)), fromDevice.Transform(new Point(wa.Right, wa.Bottom)));
+        }
+
+        /// <summary>A point in an element, on the screen in device-independent pixels (null when it isn't on screen).</summary>
+        static Point? ScreenPoint(UIElement el, Point p)
+        {
+            try
+            {
+                var src = PresentationSource.FromVisual(el);
+                if (src == null || src.CompositionTarget == null) return null;
+                return src.CompositionTarget.TransformFromDevice.Transform(el.PointToScreen(p));
+            }
+            catch (Exception) { return null; }
         }
 
         /// <summary>Where an element is on the screen, in device-independent pixels.</summary>
@@ -1096,19 +983,29 @@ namespace ReadyLauncher
             {
                 var mi = o as MenuItem;
                 var heading = o as TextBlock ?? (mi == null ? null : mi.Header as TextBlock);
-                if (heading != null) return "(" + heading.Text + ")";
+                if (heading != null) return "(" + (heading.Text.Length > 0 ? heading.Text : heading.Tag as string) + ")";
                 if (mi == null) return o is Separator ? "---" : "?";
                 var chips = mi.Header as WrapPanel;
                 if (chips != null)
                     return "[buttons: " + string.Join(", ", chips.Children.OfType<Border>().Select(b => ((LampNumberPattern)b.Tag).Name + " x" + ((LampNumberPattern)b.Tag).Clicks
                         + (b.BorderThickness.Left > 0 ? " (in use)" : ""))) + "]";
                 var list = mi.Header as ScrollViewer;
+                if (list != null && list.Content is StackPanel)
+                {
+                    var lines = ((StackPanel)list.Content).Children.OfType<Border>().ToList();
+                    return "[" + mi.Tag + " list, " + lines.Count + (lines.Count > ListLinesShown ? " (scrolls, " + ListLinesShown + " at a time)" : "") + ": "
+                        + string.Join(", ", lines.Select(LineWords)) + "]";
+                }
                 if (list != null)
                 {
                     var g = (Grid)list.Content;
                     return "[list of " + g.RowDefinitions.Count + ": " + string.Join(" / ", g.Children.OfType<TextBlock>().Where(t => Grid.GetRow(t) < 3).GroupBy(t => Grid.GetRow(t))
                         .Select(r => string.Join(", ", r.Select(t => t.Text)))) + (g.RowDefinitions.Count > 3 ? " / ..." : "") + "]";
                 }
+                var button = mi.Header as Border;
+                if (button != null && button.Tag is string) return button.Tag + (button.Opacity < 1 ? " (off)" : "");
+                var chipRow = mi.Header as StackPanel;
+                if (chipRow != null && chipRow.Tag as string == "chips") return "[" + string.Join(", ", chipRow.Children.OfType<Border>().Select(ChipWords)) + "]";
                 var row = mi.Header as FrameworkElement;
                 if (row != null && row.Tag is Slider) return HeaderText(mi) + " [" + ((Slider)row.Tag).Value + "]";
                 return (mi.IsChecked ? "[x] " : "") + HeaderText(mi) + (mi.Header is DockPanel ? " (dot, X)" : "") + (mi.InputGestureText.Length > 0 ? " = " + mi.InputGestureText : "") + (mi.IsEnabled ? "" : " (off)")
@@ -1122,11 +1019,13 @@ namespace ReadyLauncher
         /// <summary>The entry whose words start with that: "Computing", or "Height&gt;9 lamps" to say in which submenu.</summary>
         MenuItem FindInLampMenu(string words)
         {
-            int arrow = words.IndexOf('>');
+            int arrow = words.LastIndexOf('>');   // "Activity & Colors>Default>Computing": Computing, in Default
             string parent = arrow < 0 ? null : words.Substring(0, arrow), start = words.Substring(arrow + 1);
+            if (parent != null && parent.IndexOf('>') >= 0) parent = parent.Substring(parent.LastIndexOf('>') + 1);
             Func<MenuItem, string, bool> starts = (m, w) => HeaderText(m) != null && HeaderText(m).StartsWith(w, StringComparison.OrdinalIgnoreCase);
-            var top = LampMenuItems().OfType<MenuItem>().ToList();
-            var all = top.SelectMany(m => new[] { m }.Concat(m.Items.OfType<MenuItem>())).ToList();
+            Func<IEnumerable<MenuItem>, IEnumerable<MenuItem>> flat = null;
+            flat = list => list.SelectMany(m => new[] { m }.Concat(flat(m.Items.OfType<MenuItem>())));   // submenus in submenus too
+            var all = flat(LampMenuItems().OfType<MenuItem>()).ToList();
             var among = parent == null ? all : all.Where(m => starts(m, parent)).SelectMany(m => m.Items.OfType<MenuItem>());
             return among.FirstOrDefault(m => starts(m, start));
         }
@@ -1161,8 +1060,15 @@ namespace ReadyLauncher
                     foreach (var sub in LampMenuItems().OfType<MenuItem>().Where(m => m.HasItems))
                     {
                         var entries = sub.Items.Cast<object>().ToList();
+                        var inner = entries.OfType<MenuItem>().Where(m => m.HasItems).ToList();   // a submenu's own submenus, after it
                         sub.Items.Clear();
                         row.Add(MenuPicture(BuildMenu(entries)));
+                        foreach (var deeper in inner)
+                        {
+                            var more = deeper.Items.Cast<object>().ToList();
+                            deeper.Items.Clear();
+                            row.Add(MenuPicture(BuildMenu(more)));
+                        }
                     }
                     rows.Add(row);
                 }

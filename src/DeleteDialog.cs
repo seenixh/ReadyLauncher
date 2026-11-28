@@ -98,6 +98,19 @@ namespace ReadyLauncher
             SavePicture(ForActivity(name, summary), theme, file);
         }
 
+        static DeleteDialog ForColorSet(string name, string colors)
+        {
+            return new DeleteDialog("Delete saved lamp colors", "Delete these saved lamp colors?", name + ": " + colors,
+                "They come off your list of saved colors. The lamps keep the colors they have now.", null);
+        }
+
+        /// <summary>Whether to delete the lamp colors saved as <paramref name="name"/>.</summary>
+        public static bool AskColorSet(Window owner, SettingsThemeMode theme, string name, string colors)
+        {
+            if (Program.TestMode && TestAnswer != null) { TestAsked = name; return TestAnswer.Value; }
+            return Show(ForColorSet(name, colors), owner, theme);
+        }
+
         /// <summary>Whether to delete the custom color <paramref name="hex"/> (shown as <paramref name="swatch"/>).</summary>
         public static bool Ask(Window owner, SettingsThemeMode theme, string hex, Color swatch)
         {

@@ -228,6 +228,8 @@ namespace ReadyLauncher
         readonly bool[,] on = new bool[Rows, Cols];
         readonly double[,] glow = new double[Rows, Cols];
         readonly double[,] next = new double[Rows, Cols];   // seconds until each LED goes on or off
+        readonly byte[,] tint = new byte[Rows, Cols];       // which of the colors each LED has (one of them, picked as it lights)
+        LedLook[] looks = { LedLook.Red };
         double lastOn, lastOff;   // the pace those were drawn for
         double last;
 
@@ -285,6 +287,59 @@ namespace ReadyLauncher
             else timer.Stop();
         }
 
+        /// <summary>
+        /// The LEDs' colors, as they look lit (null or none: the usual red). With several, each LED takes one of them as it
+        /// lights, picked at random.
+        /// </summary>
+        public Color[] Tints
+        {
+            set
+            {
+                looks = value == null || value.Length == 0 ? new[] { LedLook.Red } : value.Select(LedLook.For).ToArray();
+                for (int r = 0; r < Rows; r++)
+                    for (int c = 0; c < Cols; c++) tint[r, c] = (byte)rnd.Next(looks.Length);
+                InvalidateVisual();
+            }
+        }
+
+        /// <summary>Test copies: how many colors its LEDs have.</summary>
+        public int TintCount { get { return looks.Length; } }
+
+        /// <summary>An LED's look in one color: dark, dim, lit, and the light around it as it fades.</summary>
+        sealed class LedLook
+        {
+            public Brush Off, Dim, Lit;
+            public Brush[] Glows;
+
+            public static readonly LedLook Red = new LedLook { Off = OffBrush, Dim = DimBrush, Lit = LitBrush, Glows = GlowBrushes };
+            static readonly System.Collections.Generic.Dictionary<Color, LedLook> made = new System.Collections.Generic.Dictionary<Color, LedLook>();
+
+            public static LedLook For(Color c)
+            {
+                LedLook look;
+                if (made.TryGetValue(c, out look)) return look;
+                Func<double, Color> scaled = k => Color.FromRgb((byte)(c.R * k), (byte)(c.G * k), (byte)(c.B * k));
+                Color white = Color.FromRgb(255, 255, 255), hot = Color.FromRgb((byte)((c.R + 255) / 2), (byte)((c.G + 255) / 2), (byte)((c.B + 255) / 2));
+                look = new LedLook
+                {
+                    Off = Frozen(new SolidColorBrush(scaled(0.18))),
+                    Dim = Frozen(new SolidColorBrush(scaled(0.6))),
+                    Lit = Frozen(new RadialGradientBrush(hot, c) { GradientOrigin = new Point(0.4, 0.35) }),
+                    Glows = new Brush[GlowBrushes.Length]
+                };
+                for (int k = 0; k < look.Glows.Length; k++)
+                {
+                    double b = (k + 1) / (double)look.Glows.Length;
+                    var g = new RadialGradientBrush();
+                    g.GradientStops.Add(new GradientStop(Color.FromArgb((byte)(150 * b), c.R, c.G, c.B), 0));
+                    g.GradientStops.Add(new GradientStop(Color.FromArgb((byte)(50 * b), c.R, c.G, c.B), 0.5));
+                    g.GradientStops.Add(new GradientStop(Color.FromArgb(0, c.R, c.G, c.B), 1));
+                    look.Glows[k] = Frozen(g);
+                }
+                return made[c] = look;
+            }
+        }
+
         /// <summary>Test copies: how many times its LEDs have gone on or off.</summary>
         public long Changes { get; private set; }
 
@@ -311,6 +366,7 @@ namespace ReadyLauncher
                     next[r, c] -= dt;
                     if (next[r, c] > 0) continue;
                     on[r, c] = !on[r, c];
+                    if (on[r, c] && looks.Length > 1) tint[r, c] = (byte)rnd.Next(looks.Length);   // a color for this time it's lit
                     Changes++;
                     // how long until it changes again: random, mostly short, now and then much longer
                     next[r, c] = -Math.Log(1 - rnd.NextDouble()) * (on[r, c] ? onFor : offFor);
@@ -333,13 +389,15 @@ namespace ReadyLauncher
                 {
                     var p = new Point(x0 + c * Pitch, y0 + r * Pitch);
                     double g = glow[r, c];
-                    if (g > 0.05) dc.DrawEllipse(GlowBrushes[Math.Min(GlowBrushes.Length - 1, (int)(g * (GlowBrushes.Length - 1) + 0.5))], null, p, Dot * 2.4, Dot * 2.4);
+                    var glows = looks[tint[r, c] % looks.Length].Glows;
+                    if (g > 0.05) dc.DrawEllipse(glows[Math.Min(glows.Length - 1, (int)(g * (glows.Length - 1) + 0.5))], null, p, Dot * 2.4, Dot * 2.4);
                 }
             for (int r = 0; r < Rows; r++)
                 for (int c = 0; c < Cols; c++)
                 {
                     double g = glow[r, c];
-                    dc.DrawEllipse(g > 0.5 ? LitBrush : g > 0.15 ? DimBrush : OffBrush, null, new Point(x0 + c * Pitch, y0 + r * Pitch), Dot, Dot);
+                    var look = looks[tint[r, c] % looks.Length];
+                    dc.DrawEllipse(g > 0.5 ? look.Lit : g > 0.15 ? look.Dim : look.Off, null, new Point(x0 + c * Pitch, y0 + r * Pitch), Dot, Dot);
                 }
         }
 

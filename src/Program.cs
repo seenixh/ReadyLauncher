@@ -10,8 +10,8 @@ using WF = System.Windows.Forms;
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]
 [assembly: System.Reflection.AssemblyTitle("Ready Launcher")]
 [assembly: System.Reflection.AssemblyProduct("Ready Launcher")]
-[assembly: System.Reflection.AssemblyVersion("2.4.3.0")]
-[assembly: System.Reflection.AssemblyFileVersion("2.4.3.0")]
+[assembly: System.Reflection.AssemblyVersion("2.5.9.0")]
+[assembly: System.Reflection.AssemblyFileVersion("2.5.9.0")]
 
 namespace ReadyLauncher
 {

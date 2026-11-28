@@ -53,8 +53,13 @@ namespace ReadyLauncher
                 var edge = Color.FromArgb((byte)(255 * Math.Max(0.4, bgAlpha)), FrameBorder.R, FrameBorder.G, FrameBorder.B);
                 lampWindow = new LampWindow(S.LampMode, S.LampRows, edge, Corner, LampAbove, S.LampMonitor);
                 Satellite(lampWindow);
-                lampWindow.Lamps.Palette = LampPalette.From(S);
-                if (lampWindow.Monitor != null) lampWindow.Monitor.Lamps.Palette = LampPalette.From(S);
+                lampWindow.Lamps.Palette = LampPalette.ForStrip(S);
+                lampWindow.Lamps.Thirds = LampPalette.ForThirds(S);
+                if (lampWindow.Monitor != null)
+                {
+                    lampWindow.Monitor.Lamps.Palette = LampPalette.ForMonitor(S);
+                    lampWindow.Monitor.Board.Tints = LampPalette.ForMini(S);
+                }
                 HookLampStrip(lampWindow.Lamps, false);
                 if (lampWindow.Monitor != null) HookLampMenu(lampWindow.Monitor);
                 TidyBallAnswer();
@@ -208,14 +213,42 @@ namespace ReadyLauncher
         void HookLampMenu(UIElement el)
         {
             el.MouseRightButtonDown += (s, e) => { e.Handled = true; };
-            el.MouseRightButtonUp += (s, e) => { e.Handled = true; ShowLampMenu(); };
+            el.MouseRightButtonUp += (s, e) => { e.Handled = true; ShowLampMenu(ScreenPoint(el, e.GetPosition(el))); };
         }
 
-        void ShowLampMenu()
+        Point? lastLampMenuAt;   // where the strip's menu was last opened, on the screen (device-independent pixels)
+        Action<string> testNote;   // test copies: where steps note what happens
+
+        void ShowLampMenu(Point? at)
         {
             var items = LampMenuItems();
             if (lampMenuProbe != null) { lampMenuProbe(DescribeMenu(items)); return; }
-            ShowMenu(null, items);
+            lastLampMenuAt = at;
+            OpenLampMenu(items, at);
+        }
+
+        /// <summary>
+        /// The strip's menu, where it leaves the lamps (and the monitor) in sight as you change them: just above them, at
+        /// the point clicked, or below them if there isn't room above (where it was clicked, if it fits neither way). Its
+        /// submenus keep clear of them too.
+        /// </summary>
+        ContextMenu OpenLampMenu(List<object> items, Point? at)
+        {
+            var menu = BuildMenu(items);
+            foreach (var sub in items.OfType<MenuItem>().Where(m => m.HasItems)) OpenClear(sub, sub.Tag as string == HighSubmenu);
+            if (at.HasValue)
+            {
+                menu.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                var place = ClearMenuPlace(menu.DesiredSize, at.Value, LampsArea(), WorkAreaAt(at.Value));
+                if (place.HasValue)
+                {
+                    menu.Placement = System.Windows.Controls.Primitives.PlacementMode.AbsolutePoint;
+                    menu.HorizontalOffset = place.Value.X;
+                    menu.VerticalOffset = place.Value.Y;
+                }
+            }
+            menu.IsOpen = true;
+            return menu;
         }
 
         /// <summary>Saves the lamps' activity; the strip on screen changes right away.</summary>
@@ -245,7 +278,8 @@ namespace ReadyLauncher
         /// <summary>Ticks or clears one of your own colors, and uses them; the last one stays ticked.</summary>
         void PickLampHue(LampHue h)
         {
-            bool had = S.LampPicked.Contains(h), own = S.LampColors == LampColors.Picked;
+            bool had = S.LampPicked.Contains(h), own = S.LampColors == LampColors.Picked && S.LampColorList.Count == 0;
+            FixedLampColors();
             S.LampColors = LampColors.Picked;
             if (!had) S.LampPicked.Add(h);
             else if (own && LampColorsTicked > 1) S.LampPicked.Remove(h);
@@ -259,7 +293,8 @@ namespace ReadyLauncher
         /// <summary>The same for a color from the wheel.</summary>
         void TickLampCustom(LampCustomColor c)
         {
-            bool own = S.LampColors == LampColors.Picked;
+            bool own = S.LampColors == LampColors.Picked && S.LampColorList.Count == 0;
+            FixedLampColors();
             S.LampColors = LampColors.Picked;
             if (!c.On) c.On = true;
             else if (own && LampColorsTicked > 1) c.On = false;
@@ -275,11 +310,19 @@ namespace ReadyLauncher
             try { picked = LampPalette.Hex(ColorPickerDialog.Pick(this, start)); }
             finally { app.ModalOpen = false; }
             if (picked == null) return;
+            bool ownInUse = S.LampColors == LampColors.Picked && S.LampColorList.Count == 0;
             if (change != null) { change.Color = picked; change.On = true; }
             else if (S.LampCustom.All(c => c.Color != picked)) S.LampCustom.Add(new LampCustomColor { Color = picked, On = true });
             foreach (var c in S.LampCustom) if (c.Color == picked) c.On = true;   // one you had already
             S.LampCustom = LampPalette.Tidy(S.LampCustom);
-            S.LampColors = LampColors.Picked;
+            showLine = "custom:" + picked;
+            if (S.LampRandomColors == LampRandomColors.None)   // (picking colors at random, it's one more to pick from)
+            {
+                if (!ownInUse) foreach (var c in S.LampCustom) c.On = c.Color == picked;   // yours weren't in use: this one alone
+                FixedLampColors();
+                S.LampColors = LampColors.Picked;
+                S.LampPicked.Clear();   // your own colors are your custom ones
+            }
             ApplyLampColors();
         }
 
@@ -287,7 +330,7 @@ namespace ReadyLauncher
         void RemoveLampCustom(LampCustomColor c)
         {
             S.LampCustom.Remove(c);
-            if (S.LampColors == LampColors.Picked && LampColorsTicked == 0) S.LampPicked.Add(LampHue.Blue);   // something to start from
+            if (S.LampColors == LampColors.Picked && LampColorsTicked == 0) S.LampColors = LampColors.RedAmber;   // none of yours left ticked: the usual
             ApplyLampColors();
         }
 
@@ -295,8 +338,20 @@ namespace ReadyLauncher
         void ApplyLampColors()
         {
             app.Save();
-            var palette = LampPalette.From(S);
-            foreach (var p in LampPanel.OnScreen) p.Palette = palette;
+            UseLampPalette();
+        }
+
+        /// <summary>The lamps on screen in the colors chosen (without saving them).</summary>
+        void UseLampPalette()
+        {
+            LampPalette strip = LampPalette.ForStrip(S), monitor = LampPalette.ForMonitor(S);
+            var thirds = LampPalette.ForThirds(S);
+            foreach (var p in LampPanel.OnScreen)
+            {
+                p.Palette = p.InMonitor ? monitor : strip;
+                p.Thirds = p.InMonitor ? null : thirds;
+            }
+            if (lampWindow != null && lampWindow.Monitor != null) lampWindow.Monitor.Board.Tints = LampPalette.ForMini(S);
         }
 
         /// <summary>Makes the strip this many lamps high; it changes right away.</summary>
@@ -426,6 +481,30 @@ namespace ReadyLauncher
             UpdateLampWindow();
         }
 
+        /// <summary>Test copies only: the lines in the lists in a menu.</summary>
+        static IEnumerable<Border> LinesIn(MenuItem menu)
+        {
+            foreach (var mi in menu.Items.OfType<MenuItem>())
+            {
+                var scroll = mi.Header as ScrollViewer;
+                var panel = scroll == null ? null : scroll.Content as StackPanel;
+                if (panel != null) foreach (var b in panel.Children.OfType<Border>()) yield return b;
+            }
+        }
+
+        /// <summary>Test copies only: the ticks and buttons in rows in a menu, its submenus' too.</summary>
+        static IEnumerable<Border> ChipsIn(MenuItem menu)
+        {
+            foreach (var o in menu.Items)
+            {
+                var mi = o as MenuItem;
+                if (mi == null) continue;
+                var row = mi.Header as StackPanel;
+                if (row != null && row.Tag as string == "chips") foreach (var b in row.Children.OfType<Border>()) yield return b;
+                foreach (var b in ChipsIn(mi)) yield return b;
+            }
+        }
+
         /// <summary>
         /// Test copies only: "lamptest:" steps two seconds apart, logged to lamp-test.txt. menu: the right-click menu;
         /// pick:&lt;start of a choice&gt;: clicks it; lamps: what each strip on screen is doing; rightclick: right-clicks
@@ -437,6 +516,7 @@ namespace ReadyLauncher
             var clock = System.Diagnostics.Stopwatch.StartNew();
             string log = System.IO.Path.Combine(LauncherData.DataFolder, "lamp-test.txt");
             Action<string> write = line => { try { System.IO.File.AppendAllText(log, line + "\r\n"); } catch (Exception) { } };
+            testNote = write;
             Func<LampPanel, string> where = p =>
             {
                 var w = Window.GetWindow(p);
@@ -539,6 +619,203 @@ namespace ReadyLauncher
                         }
                     }
                     else if (step == "menufade") SettingsTheme.TestCloseAtOnce(write);
+                    else if (step.StartsWith("line:"))
+                    {
+                        // A line in a list in Activity & Colors (a saved activity, custom color or saved colors), clicked.
+                        var line = LinesIn(LampLooksMenu()).FirstOrDefault(b => string.Equals(b.Tag as string, arg, StringComparison.OrdinalIgnoreCase));
+                        write("line " + arg + ": " + (line == null ? "NOT FOUND" : "clicked"));
+                        if (line != null)
+                        {
+                            line.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonDownEvent });
+                            line.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+                        }
+                    }
+                    else if (step == "thirds") write("thirds lit: " + string.Join(" | ", LampPanel.OnScreen.Where(p => !p.InMonitor).Select(p => p.ThirdsReport())));
+                    else if (step.StartsWith("partopen:"))
+                    {
+                        // A color's "Use for" panel opened (far off screen) from its line, one of its lamps clicked, a picture of
+                        // it saved (part-panel.png), and closed again.
+                        var line = LinesIn(LampLooksMenu()).FirstOrDefault(b => string.Equals(b.Tag as string, arg, StringComparison.OrdinalIgnoreCase) && b.DataContext is List<string>);
+                        if (line == null) write("partopen: NO SUCH COLOR LINE");
+                        else
+                        {
+                            // Its list shown far off screen (never focused), as it's shown in the open menu: the panel opens only from a line on screen.
+                            var scroll = (ScrollViewer)((StackPanel)line.Parent).Parent;
+                            var listEntry = (MenuItem)scroll.Parent;
+                            listEntry.Header = null;
+                            var host = new Window { Content = scroll, Left = -30000, Top = -30000, Width = 420, Height = 400, ShowActivated = false, ShowInTaskbar = false, WindowStyle = WindowStyle.None };
+                            host.Show();
+                            host.UpdateLayout();
+                            var dock = (DockPanel)line.Child;
+                            ShowPartColorsMenu(line, arg, (List<string>)line.DataContext, () => { });
+                            Dispatcher.Invoke(new Action(() => { }), System.Windows.Threading.DispatcherPriority.ContextIdle);   // (it opens once it's loaded, a moment later)
+                            var panel = partPopup == null ? null : partPopup.Child as Border;
+                            var rows = panel == null ? new List<Border>() : ((StackPanel)panel.Child).Children.OfType<Border>().ToList();
+                            write("partopen " + arg + ": open " + (partPopup != null && partPopup.IsOpen) + ", part of the line " + dock.Children.Contains(partPopup)
+                                  + ", in the panel: " + string.Join(", ", rows.Select(LineWords)));
+                            var monitor = rows.FirstOrDefault(b => b.Tag as string == "Monitor lamps");
+                            if (monitor != null)
+                            {
+                                monitor.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonDownEvent });
+                                monitor.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+                            }
+                            write("  Monitor lamps clicked: " + string.Join(", ", rows.Select(LineWords)) + "; the monitor's lamps now: "
+                                  + string.Join("; ", LampPanel.OnScreen.Where(p => p.InMonitor).Select(p => p.Palette.ToString())) + "; still open " + (partPopup != null && partPopup.IsOpen));
+                            if (panel != null)
+                            {
+                                panel.UpdateLayout();
+                                var dpi = VisualTreeHelper.GetDpi(panel);
+                                var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(panel.ActualWidth * dpi.DpiScaleX) + 1, (int)Math.Ceiling(panel.ActualHeight * dpi.DpiScaleY) + 1,
+                                    96 * dpi.DpiScaleX, 96 * dpi.DpiScaleY, PixelFormats.Pbgra32);
+                                rtb.Render(panel);
+                                var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                                enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rtb));
+                                using (var fs = System.IO.File.Create(System.IO.Path.Combine(LauncherData.DataFolder, "part-panel.png"))) enc.Save(fs);
+                            }
+                            var shown = partPopup;
+                            ClosePartPopup();
+                            write("  closed: " + (shown != null && !shown.IsOpen) + ", taken out of the line " + !dock.Children.Contains(shown));
+                            host.Close();
+                        }
+                    }
+                    else if (step.StartsWith("partmenu:") || step.StartsWith("part:"))
+                    {
+                        // partmenu:<a color's line>: its right-click menu, described; part:<line>><lamps>: one of them clicked.
+                        string lineName = step.StartsWith("part:") ? arg.Substring(0, arg.LastIndexOf('>')) : arg;
+                        var line = LinesIn(LampLooksMenu()).FirstOrDefault(b => string.Equals(b.Tag as string, lineName, StringComparison.OrdinalIgnoreCase) && b.DataContext is List<string>);
+                        if (line == null) write(step + ": NO SUCH COLOR LINE");
+                        else
+                        {
+                            var colors = (List<string>)line.DataContext;
+                            var items = PartColorsItems(lineName, colors, () => { });
+                            if (step.StartsWith("partmenu:")) write("right-click on " + lineName + ": " + DescribeMenu(items));
+                            else
+                            {
+                                string want = arg.Substring(arg.LastIndexOf('>') + 1);
+                                var mi = items.OfType<MenuItem>().FirstOrDefault(m => string.Equals(m.Header as string, want, StringComparison.OrdinalIgnoreCase));
+                                if (mi != null) mi.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                                write("right-click on " + lineName + ", " + want + (mi == null ? ": NOT THERE" : " clicked, now " + (mi.IsChecked ? "ticked" : "unticked"))
+                                      + " | lamps on screen: " + string.Join("; ", LampPanel.OnScreen.Select(p => (p.InMonitor ? "monitor " : "strip ") + p.Palette))
+                                      + "; strip thirds: " + string.Join(" | ", LampPanel.OnScreen.Where(p => !p.InMonitor).Select(p => p.ThirdsReport()))
+                                      + "; mini lamps: " + (lampWindow != null && lampWindow.Monitor != null ? lampWindow.Monitor.Board.TintCount + " color(s), " + (LampPalette.ForMini(S) == null ? "red" : string.Join("/", S.LampMiniColors)) : "no monitor")
+                                      + " | " + LooksNow());
+                            }
+                        }
+                    }
+                    else if (step.StartsWith("x:"))
+                    {
+                        // The X on a saved activity, custom color or saved colors in Activity & Colors, clicked (a press and a release).
+                        var entry = LinesIn(LampLooksMenu()).FirstOrDefault(b => string.Equals(b.Tag as string, arg, StringComparison.OrdinalIgnoreCase));
+                        var x = entry == null ? null : ((DockPanel)entry.Child).Children.OfType<Border>().FirstOrDefault(c => c.Tag as string == "delete");
+                        write("x on " + arg + ": " + (x == null ? "NOT FOUND" : "clicked"));
+                        if (x != null)
+                        {
+                            x.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonDownEvent });
+                            x.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+                        }
+                    }
+                    else if (step == "inplace")
+                    {
+                        // Activity & Colors as it is when open: an activity and colors picked at random, both "Add random ..."
+                        // buttons clicked (a press and a release), and the same menu described: the new saved ones should be in
+                        // it, and the buttons still there (grey now: saved already).
+                        S.LampRandomColors |= LampRandomColors.RandomSingle;
+                        RandomizeLampActivity(true);
+                        RandomizeLampColors(true);
+                        var menu = LampLooksMenu();
+                        var buttons = menu.Items.OfType<MenuItem>().Where(m => m.Header is Border && (m.Tag as string ?? "").StartsWith("Add random")).ToList();
+                        foreach (var b in buttons)
+                        {
+                            var row = (Border)b.Header;
+                            row.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonDownEvent });
+                            row.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+                        }
+                        write("in place: clicked " + buttons.Count + " buttons, still in the menu: " + buttons.All(b => menu.Items.Contains(b)) + " | " + DescribeMenu(menu.Items.Cast<object>()));
+                    }
+                    else if (step == "multiplecounts")
+                    {
+                        // Random (multiple), picked 1000 times: how many colors each time, and how close two of them came.
+                        var counts = new SortedDictionary<int, int>();
+                        double closest = 360;
+                        for (int i = 0; i < 1000; i++)
+                        {
+                            var pick = PickRandomColors(LampRandomColors.RandomMultiple);
+                            int n;
+                            counts.TryGetValue(pick.Count, out n);
+                            counts[pick.Count] = n + 1;
+                            var hues = pick.Select(LampPalette.HueOf).ToList();
+                            for (int a = 0; a < hues.Count; a++)
+                                for (int b = a + 1; b < hues.Count; b++)
+                                {
+                                    double gap = Math.Abs(hues[a] - hues[b]);
+                                    closest = Math.Min(closest, Math.Min(gap, 360 - gap));
+                                }
+                        }
+                        write("Random (multiple), 1000 picks: " + string.Join(", ", counts.Select(kv => kv.Value + " of " + kv.Key + " colors"))
+                              + "; the closest two colors in any pick were " + Math.Round(closest) + " degrees apart on the color wheel");
+                    }
+                    else if (step == "menuplace")
+                    {
+                        // Where the strip's menu would open, right-clicked in the middle of the strip, and Activity & Colors beside it.
+                        var strip = LampPanel.OnScreen.FirstOrDefault(p => !p.InMonitor && p.IsVisible);
+                        var area = LampsArea();
+                        if (strip == null || !area.HasValue) write("menuplace: no lamps on screen");
+                        else
+                        {
+                            var sr = ScreenRect(strip);
+                            var at = new Point(sr.Left + sr.Width / 2, sr.Top + sr.Height / 2);
+                            var items = LampMenuItems();
+                            var looks = items.OfType<MenuItem>().First(m => m.Tag as string == HighSubmenu);
+                            var entries = looks.Items.Cast<object>().ToList();
+                            looks.Items.Clear();
+                            var menu = BuildMenu(items);
+                            menu.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                            var subMenu = BuildMenu(entries);
+                            subMenu.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                            var work = WorkAreaAt(at);
+                            var place = ClearMenuPlace(menu.DesiredSize, at, area, work);
+                            var root = place.HasValue ? new Rect(place.Value, menu.DesiredSize) : new Rect(at, menu.DesiredSize);
+                            var usual = new Rect(root.Right - 8, root.Top + 60, subMenu.DesiredSize.Width, subMenu.DesiredSize.Height);   // (its entry: the 4th, about 60 down)
+                            var subAt = usual;
+                            subAt.Offset(0, ClearSubmenuOffset(Math.Min(0, root.Top - usual.Top), usual, area, work));
+                            Func<Rect, string> r = x => Math.Round(x.Left) + "," + Math.Round(x.Top) + " to " + Math.Round(x.Right) + "," + Math.Round(x.Bottom);
+                            Func<Rect, string> clear = x => x.Top < area.Value.Bottom && x.Bottom > area.Value.Top && x.Left < area.Value.Right && x.Right > area.Value.Left ? "COVERS THE LAMPS" : "clear of the lamps";
+                            write("menuplace: lamps " + r(area.Value) + "; screen's work area " + r(work) + "; clicked at " + Math.Round(at.X) + "," + Math.Round(at.Y)
+                                  + " | menu " + r(root) + (place.HasValue ? "" : " (where clicked: no room above or below)") + ", " + clear(root)
+                                  + " | Activity & Colors " + r(subAt) + ", " + clear(subAt) + (subAt.Top < work.Top - 0.5 ? ", OFF THE TOP" : ""));
+                        }
+                    }
+                    else if (step == "looks") write("looks: " + LooksNow());
+                    else if (step == "looksmenu") write("looksmenu: " + DescribeMenu(LampLooksMenu().Items.Cast<object>()));
+                    else if (step == "openrandom")
+                    {
+                        RandomizeOnOpen();   // as the launcher does as it opens
+                        write("as the launcher opens: " + LooksNow());
+                    }
+                    else if (step.StartsWith("chip:"))
+                    {
+                        // A tick or button in a row of them in Activity & Colors, clicked (a press and a release on it).
+                        int hash = arg.LastIndexOf('#'), nth = 1;   // "Randomize now#2": the second one called that
+                        string want = arg;
+                        if (hash > 0 && int.TryParse(arg.Substring(hash + 1), out nth)) want = arg.Substring(0, hash);
+                        else nth = 1;
+                        var chip = ChipsIn(LampLooksMenu()).Where(b => string.Equals(b.Tag as string, want, StringComparison.OrdinalIgnoreCase)).Skip(nth - 1).FirstOrDefault();
+                        if (chip == null) write("chip " + arg + ": NO SUCH CHIP");
+                        else
+                        {
+                            string before = ChipWords(chip);
+                            chip.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonDownEvent });
+                            chip.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+                            write("chip " + before + " clicked, now " + ChipWords(chip) + " | " + LooksNow());
+                        }
+                    }
+                    else if (step.StartsWith("savecolors:")) { SaveLampColors(arg); write("saved colors as " + arg + " | " + LooksNow()); }
+                    else if (step.StartsWith("addcustom:"))
+                    {
+                        S.LampCustom.Add(new LampCustomColor { Color = LampPalette.Hex(arg), On = false });
+                        S.LampCustom = LampPalette.Tidy(S.LampCustom);
+                        write("custom colors now: " + string.Join(" ", S.LampCustom.Select(c => c.Color + (c.On ? "+" : "-"))));
+                    }
                     else if (step == "settingsok") app.TestSettingsOk(write);
                     else if (step == "ballnow")
                     {

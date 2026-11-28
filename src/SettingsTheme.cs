@@ -167,7 +167,7 @@ namespace ReadyLauncher
                 b.Freeze();
                 rd["T." + Keys[i]] = b;
             }
-            if (menuStyles == null) menuStyles = (ResourceDictionary)XamlReader.Parse(Head + SliderXaml + MenuXaml + Tail);
+            if (menuStyles == null) menuStyles = (ResourceDictionary)XamlReader.Parse(Head + ScrollXaml + SliderXaml + MenuXaml + Tail);   // (slim scroll bars for a submenu taller than the screen)
             rd.MergedDictionaries.Add(menuStyles);
             menu.Resources = rd;
             menu.Style = (Style)menuStyles[typeof(ContextMenu)];
@@ -257,7 +257,9 @@ namespace ReadyLauncher
             sub.ApplyTemplate();
             sub.RaiseEvent(new RoutedEventArgs(MenuItem.SubmenuOpenedEvent, sub));   // (its popup isn't opened)
             var subPopup = sub.Template == null ? null : sub.Template.FindName("PART_Popup", sub) as System.Windows.Controls.Primitives.Popup;
-            write("  a submenu's popup: " + (subPopup == null ? "NOT FOUND" : "found, animation " + subPopup.PopupAnimation + ", closes at once once open: " + fadeOutStopped.TryGetValue(subPopup, out seen)));
+            var subScroll = subPopup == null || !(subPopup.Child is Border) ? null : ((Border)subPopup.Child).Child as ScrollViewer;
+            write("  a submenu's popup: " + (subPopup == null ? "NOT FOUND" : "found, animation " + subPopup.PopupAnimation + ", closes at once once open: " + fadeOutStopped.TryGetValue(subPopup, out seen))
+                  + "; it scrolls once taller than " + (subScroll == null ? "NO SCROLLING" : subScroll.MaxHeight + " (the screen's work area is " + SystemParameters.WorkArea.Height + " high)"));
 
             Func<string, System.Windows.Controls.Primitives.Popup> make = name => new System.Windows.Controls.Primitives.Popup
             {
@@ -519,7 +521,10 @@ namespace ReadyLauncher
                 <Border Margin='0,0,8,8' Background='{DynamicResource T.Control}' BorderBrush='{DynamicResource T.Border}'
                         BorderThickness='1' CornerRadius='6' Padding='4'>
                   <Border.Effect><DropShadowEffect BlurRadius='10' ShadowDepth='2' Direction='270' Opacity='0.35'/></Border.Effect>
-                  <StackPanel IsItemsHost='True' Grid.IsSharedSizeScope='True' KeyboardNavigation.DirectionalNavigation='Cycle'/>
+                  <ScrollViewer VerticalScrollBarVisibility='Auto' HorizontalScrollBarVisibility='Disabled' Focusable='False'
+                                MaxHeight='{Binding Source={x:Static SystemParameters.WorkArea}, Path=Height}'>
+                    <StackPanel IsItemsHost='True' Grid.IsSharedSizeScope='True' KeyboardNavigation.DirectionalNavigation='Cycle'/>
+                  </ScrollViewer>
                 </Border>
               </Popup>
             </Grid>

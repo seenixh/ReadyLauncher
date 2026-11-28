@@ -15,6 +15,8 @@ namespace ReadyLauncher
     public enum LampActivity { Standby, Idle, Computing, Alert, Random, Custom }   // Random: switches between the first four now and then; Custom: your own (LampActivityLevels)
     public enum LampHue { Pink, Red, Orange, Amber, Gold, Yellow, Green, Cyan, Blue, Purple, Grey, White }   // lamp colors to pick from: saved by name; Settings lists them in this order
     public enum LampColors { AsIs, RedAmber, RedGreen, ChristmasLights, Picked }   // the lamps' colors (AsIs: only in looks from before 1.93, which leave them alone; RedGreen and ChristmasLights: only in settings and looks from before 1.97)
+    [Flags] public enum LampRandomColors { None = 0, CustomSingle = 1, CustomMultiple = 2, RandomSingle = 4, RandomMultiple = 8 }   // the kinds of colors picked at random each time the launcher opens
+    [Flags] public enum LampActivityParts { None = 0, Strip = 1, Monitor = 2, Red = 4, All = Strip | Monitor | Red }   // the lamps your own activity's sliders in the strip's menu, and randomizing, change
     public enum LampMonitorPlace { None, Left, Right }   // a computer cabinet at one end of a lamp strip outside the launcher
     public enum LampTextEffect { None, Scroll, Flash, Still, Emerge }   // words spelled out in lamps on the strip: saved by name; Settings lists them in this order
     public enum DockAlignment { Start, Center, End }
@@ -189,12 +191,12 @@ namespace ReadyLauncher
 
     /// <summary>
     /// A lamp activity of your own (<see cref="LampActivity.Custom"/>): how quick, and how many lit, for the strip's lamps,
-    /// the monitor's lamps and the monitor's small red lamps. Speed goes from 1 to 20, 10 being as quick as Computing; lamps
+    /// the monitor's lamps and the monitor's mini lamps. Speed goes from 1 to 20, 10 being as quick as Computing; lamps
     /// is the share of them lit, 0 to 100%. Saved ones have a name.
     /// </summary>
     public class LampActivityLevels
     {
-        public const int MinSpeed = 1, MaxSpeed = 20, UsualSpeed = 10, MaxSaved = 30;
+        public const int MinSpeed = 1, MaxSpeed = 20, UsualSpeed = 10;
         [XmlAttribute] public string Name = "";
         [XmlAttribute] public int StripSpeed = UsualSpeed;
         [XmlAttribute] public int StripLamps = 50;
@@ -242,14 +244,14 @@ namespace ReadyLauncher
             return this;
         }
 
-        /// <summary>In words: "Lamp strip: speed 10, 50% lit. Monitor lamps: ... Red lamps: ..."</summary>
+        /// <summary>In words: "Lamp strip: speed 10, 50% lit. Monitor lamps: ... Mini lamps: ..."</summary>
         public string Summary()
         {
             return "Lamp strip: speed " + StripSpeed + ", " + StripLamps + "% lit. Monitor lamps: speed " + MonitorSpeed + ", " + MonitorLamps
-                + "% lit. Red lamps: speed " + LedSpeed + ", " + LedLamps + "% lit.";
+                + "% lit. Mini lamps: speed " + LedSpeed + ", " + LedLamps + "% lit.";
         }
 
-        /// <summary>Saved ones with a name, each name once, no more than 30.</summary>
+        /// <summary>Saved ones with a name, each name once (as many as you like).</summary>
         public static List<LampActivityLevels> TidyList(IEnumerable<LampActivityLevels> saved)
         {
             var list = new List<LampActivityLevels>();
@@ -260,7 +262,7 @@ namespace ReadyLauncher
                 if (list.Any(o => string.Equals(o.Name, t.Name, StringComparison.CurrentCultureIgnoreCase))) continue;
                 list.Add(t);
             }
-            return list.Take(MaxSaved).ToList();
+            return list;
         }
 
         /// <summary>
@@ -287,6 +289,47 @@ namespace ReadyLauncher
                 string name = "Activity " + n;
                 if (!saved.Any(a => string.Equals(a.Name, name, StringComparison.CurrentCultureIgnoreCase))) return name;
             }
+        }
+    }
+
+    /// <summary>Lamp colors saved under a name: ready-made ones by name ("Blue"), others as "#RRGGBB", in order.</summary>
+    public class LampColorSet
+    {
+        [XmlAttribute] public string Name = "";
+        [XmlAttribute] public string Colors = "";   // the colors with a space between them: "Blue #FFA1DC Green"
+
+        public List<string> List() { return LampPalette.TidyList((Colors ?? "").Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)); }
+
+        /// <summary>Saved ones with a name and colors, each name once (as many as you like).</summary>
+        public static List<LampColorSet> TidyList(IEnumerable<LampColorSet> saved)
+        {
+            var list = new List<LampColorSet>();
+            foreach (var s in saved ?? new LampColorSet[0])
+            {
+                if (s == null || string.IsNullOrWhiteSpace(s.Name)) continue;
+                var colors = s.List();
+                string name = s.Name.Trim();
+                if (colors.Count == 0 || list.Any(o => string.Equals(o.Name, name, StringComparison.CurrentCultureIgnoreCase))) continue;
+                list.Add(new LampColorSet { Name = name, Colors = string.Join(" ", colors) });
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// The saved ones with <paramref name="colors"/> saved under <paramref name="name"/>: in place of one with that name
+        /// or with the same colors (so saving those again renames them), or at the end.
+        /// </summary>
+        public static List<LampColorSet> Save(List<LampColorSet> saved, string name, List<string> colors)
+        {
+            name = (name ?? "").Trim();
+            var tidy = LampPalette.TidyList(colors);
+            Func<LampColorSet, bool> same = o => string.Equals(o.Name, name, StringComparison.CurrentCultureIgnoreCase)
+                || (o.List().Count == tidy.Count && !o.List().Except(tidy).Any());
+            var list = saved.ToList();
+            int at = list.FindIndex(o => same(o));
+            list.RemoveAll(o => same(o));
+            list.Insert(at < 0 || at > list.Count ? list.Count : at, new LampColorSet { Name = name, Colors = string.Join(" ", tidy) });
+            return TidyList(list);
         }
     }
 
@@ -398,6 +441,18 @@ namespace ReadyLauncher
         [XmlArrayItem("Color")] public List<LampHue> LampPicked = new List<LampHue>();   // the lamp colors you picked (LampColors.Picked): one or more
         [XmlArrayItem("Color")] public List<LampCustomColor> LampCustom = new List<LampCustomColor>();   // and ones from the color wheel, ticked or not
         public bool LampPastel;                   // softer, paler lamp colors
+        [XmlArrayItem("Color")] public List<string> LampColorList = new List<string>();   // colors in use instead of those above: saved ones, or ones picked at random ("Blue", "#FFA1DC")
+        public bool LampColorsAtRandom;           // LampColorList was picked at random (not saved colors)
+        [XmlArrayItem("Color")] public List<string> LampStripColors = new List<string>();     // the strip's own colors (right-click a color in the strip's menu), or none: the colors above
+        [XmlArrayItem("Color")] public List<string> LampMonitorColors = new List<string>();   // the monitor's lamps' own colors, or none: the colors above
+        [XmlArrayItem("Color")] public List<string> LampMiniColors = new List<string>();      // the monitor's mini lamps' colors, or none: red
+        [XmlArrayItem("Color")] public List<string> LampLeftColors = new List<string>();      // the strip's left third's own colors, or none: the strip's
+        [XmlArrayItem("Color")] public List<string> LampMiddleColors = new List<string>();    // its middle third's
+        [XmlArrayItem("Color")] public List<string> LampRightColors = new List<string>();     // its right third's
+        public LampRandomColors LampRandomColors;   // the kinds of colors picked at random each time the launcher opens (one kind each time; none: off)
+        [XmlArrayItem("Saved")] public List<LampColorSet> LampColorSets = new List<LampColorSet>();   // colors saved under a name
+        public bool LampRandomActivity;           // your own activity, picked at random each time the launcher opens, for the lamps in LampActivityParts
+        public LampActivityParts LampActivityParts = LampActivityParts.All;   // the lamps your own activity's sliders in the strip's menu, and randomizing, change
         public int LampRows = 6;                  // the strip's height in lamps: 6 (text in capitals) to 10 (above 6, text in upper and lower case)
         public LampTextEffect LampTextMode = LampTextEffect.None;      // spell LampText on the strip: scrolling, flashing, staying still, or coming out of the blinking and going back
         public string LampText = "";
@@ -780,6 +835,18 @@ namespace ReadyLauncher
                 .OrderByDescending(k => k.When).Take(LampNumberPick.MaxKept).ToList();
             Settings.LampCustomActivity = (Settings.LampCustomActivity ?? new LampActivityLevels()).Copy("").Tidy();
             Settings.LampActivities = LampActivityLevels.TidyList(Settings.LampActivities);
+            Settings.LampColorList = LampPalette.TidyList(Settings.LampColorList);
+            if (Settings.LampColorList.Count == 0) Settings.LampColorsAtRandom = false;
+            Settings.LampColorSets = LampColorSet.TidyList(Settings.LampColorSets);
+            Settings.LampStripColors = LampPalette.TidyList(Settings.LampStripColors);
+            Settings.LampMonitorColors = LampPalette.TidyList(Settings.LampMonitorColors);
+            Settings.LampMiniColors = LampPalette.TidyList(Settings.LampMiniColors);
+            Settings.LampLeftColors = LampPalette.TidyList(Settings.LampLeftColors);
+            Settings.LampMiddleColors = LampPalette.TidyList(Settings.LampMiddleColors);
+            Settings.LampRightColors = LampPalette.TidyList(Settings.LampRightColors);
+            Settings.LampRandomColors &= LampRandomColors.CustomSingle | LampRandomColors.CustomMultiple | LampRandomColors.RandomSingle | LampRandomColors.RandomMultiple;
+            if ((Settings.LampActivityParts & LampActivityParts.All) == 0) Settings.LampActivityParts = LampActivityParts.All;
+            Settings.LampActivityParts &= LampActivityParts.All;
             Settings.LampRows = Math.Max(LampFont.MinRows, Math.Min(LampFont.MaxRows, Settings.LampRows));
             Settings.LampTailRows = Math.Max(1, Math.Min(LampFont.MaxTailRows, Settings.LampTailRows));
             Settings.LampScrollSpeed = Math.Max(AppSettings.MinScrollSpeed, Math.Min(AppSettings.MaxScrollSpeed, Settings.LampScrollSpeed));

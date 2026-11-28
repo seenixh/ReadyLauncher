@@ -74,6 +74,8 @@ namespace ReadyLauncher
         ushort[] lletter;        // and in which color
         LampPalette palette = LampPalette.Usual;
         LampPalette lightFor;    // the palette the light around the lamps was made for
+        LampPalette[] thirds = new LampPalette[3];   // the left, middle and right thirds' own colors (null: the strip's)
+        byte[] lzone;            // which third each lamp is in (0 left, 1 middle, 2 right)
         bool[] ldead;            // burned out (they light for text all the same: a letter needs every lamp)
         int[] lgx, lgy;          // each lamp's column and row in the strip's grid (for spelling text)
         int gridCols, gridRows;
@@ -154,8 +156,38 @@ namespace ReadyLauncher
             set { palette = value ?? LampPalette.Usual; }
         }
 
+        /// <summary>
+        /// Colors of their own for the strip's left, middle and right thirds (null, or null for one: the strip's). They can
+        /// change at any time, like the strip's.
+        /// </summary>
+        public LampPalette[] Thirds
+        {
+            set { thirds = value != null && value.Length == 3 ? value : new LampPalette[3]; }
+        }
+
+        /// <summary>Which third of the strip a lamp is in, by where it is from end to end.</summary>
+        int ZoneOf(int i)
+        {
+            if (lzone == null || lzone.Length != n)
+            {
+                lzone = new byte[n];
+                double lo = double.MaxValue, hi = double.MinValue;
+                for (int k = 0; k < n; k++) { lo = Math.Min(lo, lx[k]); hi = Math.Max(hi, lx[k]); }
+                double span = Math.Max(1e-6, hi - lo);
+                for (int k = 0; k < n; k++) lzone[k] = (byte)Math.Min(2, (int)(3 * (lx[k] - lo) / span));
+            }
+            return lzone[i];
+        }
+
+        /// <summary>A lamp's colors: its third's own, or the strip's.</summary>
+        LampPalette PaletteOf(int i)
+        {
+            if (thirds[0] == null && thirds[1] == null && thirds[2] == null) return palette;
+            return thirds[ZoneOf(i)] ?? palette;
+        }
+
         /// <summary>A lamp's color while it blinks: its own, or one of the palette's, mixed like strings of lights.</summary>
-        ushort BlinkColor(int i) { return palette.Blinking(lcol[i], lpick[i]); }
+        ushort BlinkColor(int i) { return PaletteOf(i).Blinking(lcol[i], lpick[i]); }
 
         const double PlateTop = 8;   // the strip's own: under the hood
 
@@ -404,11 +436,13 @@ namespace ReadyLauncher
                     double held = Math.Max(0, Math.Min(1, (came * (1 + EmergeSoft) - lorder[i]) / EmergeSoft));
                     lheld[i] = held * held * (3 - 2 * held);
                     lspell[i] = on;
-                    lletter[i] = on && palette.ColorsLetters ? palette.Letter(LampFont.LetterOf(shown[col])) : BlinkColor(i);
+                    var its = PaletteOf(i);
+                    lletter[i] = on && its.ColorsLetters ? its.Letter(LampFont.LetterOf(shown[col])) : BlinkColor(i);
                     continue;
                 }
                 lon[i] = (byte)(on ? 1 : 0);
-                if (on && palette.ColorsLetters) lshow[i] = palette.Letter(LampFont.LetterOf(shown[col]));   // each letter a color of its own
+                var pal = PaletteOf(i);
+                if (on && pal.ColorsLetters) lshow[i] = pal.Letter(LampFont.LetterOf(shown[col]));   // each letter a color of its own
             }
         }
 
@@ -452,6 +486,19 @@ namespace ReadyLauncher
             var mine = Enumerable.Range(0, n).Where(i => lgx[i] >= textFrom && lgx[i] < textTo).ToList();
             return now + " at " + t.ToString("0.0", CultureInfo.InvariantCulture) + " s, " + mine.Count(i => lheld[i] >= 0.999) + " settled and " + mine.Count(i => lheld[i] <= 0.001) + " free of " + mine.Count
                 + ", text lamps lit " + mine.Count(i => lspell[i] && lb[i] * lmax[i] >= 0.5) + " of " + mine.Count(i => lspell[i]) + ", others lit " + mine.Count(i => !lspell[i] && lb[i] * lmax[i] >= 0.5);
+        }
+
+        /// <summary>Test copies: the colors of the lamps lit in each third of the strip.</summary>
+        public string ThirdsReport()
+        {
+            var said = new List<string>();
+            for (int z = 0; z < 3; z++)
+            {
+                int zone = z;
+                var names = Enumerable.Range(0, n).Where(i => lhere[i] == 1 && lb[i] >= 0.5 && ZoneOf(i) == zone).Select(i => LampPalette.NameOf(lshow[i])).Distinct().OrderBy(x => x);
+                said.Add(new[] { "left", "middle", "right" }[z] + ": " + string.Join("/", names));
+            }
+            return string.Join("; ", said);
         }
 
         /// <summary>Test copies: how many lit lamps have each color, and the colors of the text's letters in order.</summary>
@@ -578,6 +625,7 @@ namespace ReadyLauncher
             lgx = new int[n]; lgy = new int[n];
             lon = new byte[n]; lcol = new byte[n]; lhere = new byte[n]; lmod = new int[n]; ldead = new bool[n]; lshow = new ushort[n]; lpick = new double[n];
             lheld = new double[n]; lorder = new double[n]; lspell = new bool[n]; lletter = new ushort[n];
+            lzone = null;   // (worked out again from where the lamps are now)
             emergeTurn = -1;
             var pick = new Random(1225);   // the same colors every time
             for (int i = 0; i < n; i++) lpick[i] = pick.NextDouble();
@@ -816,9 +864,9 @@ namespace ReadyLauncher
             // Lamps spelling text fade quicker, so moving letters stay sharp instead of trailing light.
             double kOn = 1 - Math.Exp(-dt / 0.03), kOff = 1 - Math.Exp(-dt / 0.12);
             double tOn = 1 - Math.Exp(-dt / 0.02), tOff = 1 - Math.Exp(-dt / 0.045);
-            bool colored = palette.ColorsLetters;   // text has its letters' colors
             for (int i = 0; i < n; i++)
             {
+                bool colored = PaletteOf(i).ColorsLetters;   // text has its letters' colors
                 bool inText = spelling && lgx[i] >= textFrom && lgx[i] < textTo;
                 if (inText && emerging)
                 {

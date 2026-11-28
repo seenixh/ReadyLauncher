@@ -139,14 +139,14 @@ namespace ReadyLauncher
             // Right-clicking them changes their activity; dragging them moves the launcher, like the strip's empty space.
             if (lampsBehind)
             {
-                var behind = new LampPanel(S.LampMode, S.LampRows, true) { Corners = inner, Palette = LampPalette.From(S) };
+                var behind = new LampPanel(S.LampMode, S.LampRows, true) { Corners = inner, Palette = LampPalette.ForStrip(S), Thirds = LampPalette.ForThirds(S) };
                 HookLampStrip(behind, true);
                 grid.Children.Add(behind);
             }
             if (lampsUnder)
             {
                 var withLamps = new DockPanel { LastChildFill = true };
-                var lamps = new LampPanel(S.LampMode, S.LampRows) { Corners = new CornerRadius(0, 0, inner.BottomRight, inner.BottomLeft), Palette = LampPalette.From(S) };
+                var lamps = new LampPanel(S.LampMode, S.LampRows) { Corners = new CornerRadius(0, 0, inner.BottomRight, inner.BottomLeft), Palette = LampPalette.ForStrip(S), Thirds = LampPalette.ForThirds(S) };
                 HookLampStrip(lamps, true);
                 DockPanel.SetDock(lamps, Dock.Bottom);
                 withLamps.Children.Add(lamps);

@@ -194,7 +194,7 @@ namespace ReadyLauncher
             ApplyLampText();   // what the strips spell, if anything
             if (S.LampPanel == LampPanelPlace.Top || S.LampPanel == LampPanelPlace.Bottom)
             {
-                lampStrip = new LampPanel(S.LampMode, S.LampRows) { Palette = LampPalette.From(S) };
+                lampStrip = new LampPanel(S.LampMode, S.LampRows) { Palette = LampPalette.ForStrip(S), Thirds = LampPalette.ForThirds(S) };
                 HookLampStrip(lampStrip, true);   // the strip moves the launcher, like the buttons row does; right-click: activity
                 DockPanel.SetDock(lampStrip, S.LampPanel == LampPanelPlace.Top ? Dock.Top : Dock.Bottom);
             }
@@ -488,6 +488,7 @@ namespace ReadyLauncher
         {
             RememberForeground();
             bool appearing = !IsVisible;
+            if (appearing) RandomizeOnOpen();   // (switched on in the strip's menu: a new activity and new colors, picked at random)
             if (hiding) StopAnimations();
             if (!IsVisible) { if (appearing) PrepareAnimateIn(); Show(); }
             if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
